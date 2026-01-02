@@ -1,0 +1,8 @@
+streamlit
+supabase
+langchain-groq
+langchain-community
+langchain-core
+langgraph
+fpdf
+tavily-python
