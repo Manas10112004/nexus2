@@ -9,7 +9,7 @@ import seaborn as sns
 from io import StringIO
 from langchain_groq import ChatGroq
 from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from typing import TypedDict, Annotated, Sequence
@@ -35,9 +35,14 @@ if not TAVILY_API_KEY or not GROQ_API_KEY:
 os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 
-# DEFINE MODEL TIERS
-MODEL_FAST = "llama-3.1-8b-instant"  # Speed / Chat
-MODEL_SMART = "llama-3.3-70b-versatile"  # Coding / Complex Tasks
+# --- INTELLIGENCE TIERS (THE POOL) ---
+SMART_MODELS = [
+    "llama-3.3-70b-versatile",  # 1. Best
+    "llama-3.1-70b-versatile",  # 2. Backup Llama
+    "mixtral-8x7b-32768",  # 3. Backup Mistral
+    "gemma2-9b-it"  # 4. Backup Google
+]
+FAST_MODEL = "llama-3.1-8b-instant"  # Safety Net
 
 
 # --- 2. DATA ENGINE ---
@@ -105,7 +110,7 @@ current_sess = st.session_state.current_session_id
 
 init_db()
 
-# --- 4. SIDEBAR & ROUTING ---
+# --- 4. SIDEBAR ---
 current_theme = load_setting("theme", "🌿 Eywa (Avatar)")
 inject_theme_css(current_theme)
 theme_data = THEMES.get(current_theme, THEMES["🌿 Eywa (Avatar)"])
@@ -113,16 +118,9 @@ theme_data = THEMES.get(current_theme, THEMES["🌿 Eywa (Avatar)"])
 with st.sidebar:
     st.title("⚙️ NEXUS HQ")
 
-    # 🧠 SMART MODEL SELECTOR
-    st.markdown("### 🧠 Intelligence")
-    model_choice = st.radio(
-        "Select Engine:",
-        ["Auto (Smart)", "⚡ Fast (8B)", "🧙‍♂️ Genius (70B)"],
-        index=0,
-        help="Auto uses 70B for Data Analysis and 8B for Chat."
-    )
-
-    st.divider()
+    st.markdown("### 🧠 Brain Power")
+    # We display what's happening but don't force user to choose manually anymore
+    st.caption("Auto-Failover System: **Active**")
 
     uploaded_file = st.file_uploader("📂 Upload File", type=None)
     if uploaded_file:
@@ -147,7 +145,7 @@ with st.sidebar:
             st.rerun()
 
 
-# --- 5. LOGIC & TOOLS ---
+# --- 5. TOOLS ---
 class PythonInput(BaseModel):
     code: str = Field(description="Python code to run. Use 'df'.")
 
@@ -160,36 +158,75 @@ tavily = TavilySearchResults(max_results=2)
 tools = [tavily]
 
 has_data = "df" in engine.scope or "file_content" in engine.scope
-
 if has_data:
     tools.append(StructuredTool.from_function(
         func=python_analysis_tool,
         name="python_analysis",
-        description="Run Python analysis.",
+        description="Run Python code.",
         args_schema=PythonInput
     ))
 
-# --- ROUTING LOGIC ---
-if model_choice == "Auto (Smart)":
-    # Use 70B if we have data (needs strict coding), otherwise 8B (speed)
-    active_model = MODEL_SMART if has_data else MODEL_FAST
-elif model_choice == "⚡ Fast (8B)":
-    active_model = MODEL_FAST
-else:
-    active_model = MODEL_SMART
 
-# Initialize LLM with selected model
-llm = ChatGroq(model=active_model, temperature=0.1)
-llm_with_tools = llm.bind_tools(tools)
-
-
-# --- 6. AGENT GRAPH ---
+# --- 6. THE SMART AGENT NODE (Failover Logic) ---
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
 
 def agent_node(state):
-    return {"messages": [llm_with_tools.invoke(state["messages"])]}
+    """
+    Tries models in order: Llama 3.3 -> Llama 3.1 -> Mixtral -> Gemma.
+    If ALL fail (Rate Limits), it falls back to the Fast 8B model.
+    """
+
+    # 1. Decide if we need smarts (Data) or speed (Chat)
+    if has_data:
+        candidate_models = SMART_MODELS  # Try the big brains
+    else:
+        candidate_models = [FAST_MODEL]  # Just use fast one
+
+    last_error = None
+
+    for model_name in candidate_models:
+        try:
+            # Initialize dynamic model
+            current_llm = ChatGroq(model=model_name, temperature=0.1).bind_tools(tools)
+
+            # Try to invoke
+            response = current_llm.invoke(state["messages"])
+
+            # If successful, append a hidden meta-data note if it was a backup model
+            if model_name != SMART_MODELS[0] and has_data:
+                # Optional: You could log this, but for now we just return the clean response
+                pass
+
+            return {"messages": [response]}
+
+        except Exception as e:
+            error_str = str(e)
+            last_error = e
+            # If rate limit, continue to next model loop
+            if "429" in error_str or "Rate limit" in error_str:
+                print(f"⚠️ Model {model_name} overloaded. Switching...")
+                continue
+            else:
+                # Real error (like context length), usually fatal, but let's try others just in case
+                continue
+
+    # 2. EMERGENCY FALLBACK (If all smart models failed)
+    try:
+        fallback_llm = ChatGroq(model=FAST_MODEL, temperature=0.1).bind_tools(tools)
+
+        # We inject a system warning so the user knows
+        fallback_msg = AIMessage(
+            content=f"⚠️ **Network Status:** All High-Intelligence models are currently at capacity. I have switched to the **Instant (8B)** engine to answer you immediately.")
+
+        response = fallback_llm.invoke(state["messages"])
+        return {"messages": [fallback_msg, response]}
+
+    except Exception as final_e:
+        return {"messages": [AIMessage(
+            content=f"❌ **System Failure:** All models including backup are offline. Error: {str(last_error)}")],
+                "final": True}
 
 
 workflow = StateGraph(AgentState)
@@ -203,8 +240,8 @@ app = workflow.compile()
 # --- 7. CHAT UI ---
 st.title(f"NEXUS // {current_theme.split(' ')[1].upper()}")
 
-# Status Bar
-st.caption(f"🚀 **Engine Active:** {active_model} | 📂 **Data Mode:** {'ON' if has_data else 'OFF'}")
+if has_data:
+    st.info(f"📊 **Analyst Mode:** Redundant Neural Link Active (4 Models)")
 
 history = load_history(current_sess)
 current_messages = []
@@ -246,7 +283,7 @@ if prompt := st.chat_input("Enter command..."):
                 last_msg = event["messages"][-1]
                 if hasattr(last_msg, 'tool_calls') and len(last_msg.tool_calls) > 0:
                     for t in last_msg.tool_calls:
-                        status_box.write(f"⚙️ **{active_model} Using:** `{t['name']}`")
+                        status_box.write(f"⚙️ **Using Tool:** `{t['name']}`")
 
                 if isinstance(last_msg, AIMessage) and last_msg.content:
                     final_response = last_msg.content
