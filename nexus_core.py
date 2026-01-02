@@ -36,10 +36,10 @@ os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 
 # --- INTELLIGENCE TIERS (CLEANED) ---
-# Removed decommissioned models (gemma2, llama-3.1-70b)
+# ⚠️ CRITICAL UPDATE: Removed decommissioned models (Gemma, Llama 3.1 70B)
 SMART_MODELS = [
-    "llama-3.3-70b-versatile",  # 1. Best (Flagship)
-    "mixtral-8x7b-32768"  # 2. Reliable Backup
+    "llama-3.3-70b-versatile",  # 1. Flagship (Best)
+    "mixtral-8x7b-32768"  # 2. Backup (Reliable)
 ]
 FAST_MODEL = "llama-3.1-8b-instant"  # Safety Net (Always Active)
 
@@ -163,7 +163,7 @@ if has_data:
     ))
 
 
-# --- 6. AGENT NODE (ROBUST FAILOVER) ---
+# --- 6. AGENT NODE (Failover Logic) ---
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
@@ -184,25 +184,23 @@ def agent_node(state):
             return {"messages": [response]}
         except Exception as e:
             last_error = e
-            # Log the failure but keep going
-            print(f"⚠️ {model_name} Failed: {str(e)}")
+            # Log failure but continue to next model
+            print(f"⚠️ {model_name} Failed. Trying next...")
             continue
 
     # 2. EMERGENCY FALLBACK
     try:
-        # If we are here, all smart models failed.
         # Force fallback to the FASTEST, smallest model.
         fallback_llm = ChatGroq(model=FAST_MODEL, temperature=0.1).bind_tools(tools)
 
         fallback_note = AIMessage(
-            content=f"⚠️ **Note:** High-intelligence models are busy or hitting rate limits. I'm using the **Instant (8B)** engine to answer this.")
+            content=f"⚠️ **Note:** Smart models are busy. I'm using the **Instant (8B)** engine to answer.")
         response = fallback_llm.invoke(state["messages"])
         return {"messages": [fallback_note, response]}
 
     except Exception as final_e:
-        # If even the fallback fails, we show the REAL error
-        return {"messages": [AIMessage(
-            content=f"❌ **System Failure:** Even the backup model failed.\nPrimary Error: {str(last_error)}\nFallback Error: {str(final_e)}")],
+        return {"messages": [
+            AIMessage(content=f"❌ **System Failure:** All models offline.\nLast Error: {str(last_error)}")],
                 "final": True}
 
 
