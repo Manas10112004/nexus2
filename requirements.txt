@@ -11,3 +11,4 @@ openpyxl
 matplotlib
 seaborn
 tabulate
+langchain_experimental
