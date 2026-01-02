@@ -9,7 +9,7 @@ import seaborn as sns
 from io import StringIO
 from langchain_groq import ChatGroq
 from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from typing import TypedDict, Annotated, Sequence
@@ -36,10 +36,10 @@ os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 MODEL_NAME = "llama-3.3-70b-versatile"
 
 
-# --- 2. IMPROVED DATA ENGINE (THE FIX) ---
+# --- 2. DATA ENGINE (NOW WITH VISUALS) ---
 class DataEngine:
     def __init__(self):
-        # We keep a persistent dictionary for variables
+        # Persistent Scope with Visualization Tools
         self.scope = {
             "pd": pd,
             "plt": plt,
@@ -70,8 +70,6 @@ class DataEngine:
             elif name.endswith(('.txt', '.py', '.md', '.log', '.yaml', '.xml')):
                 stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
                 self.file_content = stringio.read()
-
-                # INJECT INTO SCOPE
                 self.scope["file_content"] = self.file_content
                 return f"✅ Text Loaded: {len(self.file_content)} chars. (Accessible as 'file_content')"
 
@@ -86,10 +84,19 @@ class DataEngine:
         redirected_output = sys.stdout = StringIO()
 
         try:
-            # EXECUTE CODE WITH PERSISTENT SCOPE
+            # 1. EXECUTE CODE
             exec(code, self.scope)
             result = redirected_output.getvalue()
-            return f"Output:\n{result}" if result else "Code executed successfully (No output)."
+
+            # 2. CHECK FOR PLOTS (The Visual Upgrade)
+            # If the code created a figure, we render it directly to Streamlit
+            if plt.get_fignums():
+                st.pyplot(plt)  # Render plot
+                plt.clf()  # Clear plot to prevent overlapping next time
+                return f"Output:\n{result}\n[Visual Chart Rendered to UI]"
+
+            return f"Output:\n{result}" if result else "Code executed successfully."
+
         except Exception as e:
             return f"❌ Execution Error: {str(e)}"
         finally:
@@ -116,7 +123,6 @@ with st.sidebar:
     st.title("⚙️ NEXUS HQ")
     uploaded_file = st.file_uploader("📂 Upload File", type=None)
 
-    # Load File Immediately
     if uploaded_file:
         status = engine.load_file(uploaded_file)
         if "Error" in status:
@@ -138,7 +144,7 @@ with st.sidebar:
             st.session_state.current_session_id = s
             st.rerun()
 
-# --- 5. DEFINE TOOLS ---
+# --- 5. TOOLS & AGENT ---
 tavily = TavilySearchResults(max_results=2)
 tools = [tavily]
 
@@ -153,10 +159,9 @@ if has_data:
     tools.append(Tool(
         name="python_analysis",
         func=python_analysis_tool,
-        description="EXECUTE PYTHON. You have variables: 'df' (pandas) or 'file_content' (str). PRINT outputs."
+        description="EXECUTE PYTHON. Variables: 'df' (pandas), 'file_content' (str). To PLOT: use plt.plot() or sns.heatmap()."
     ))
 
-# --- 6. AGENT SETUP ---
 llm = ChatGroq(model=MODEL_NAME, temperature=0.1)
 llm_with_tools = llm.bind_tools(tools)
 
@@ -177,11 +182,11 @@ workflow.add_conditional_edges("agent", tools_condition)
 workflow.add_edge("tools", "agent")
 app = workflow.compile()
 
-# --- 7. CHAT UI ---
+# --- 6. CHAT UI ---
 st.title(f"NEXUS // {current_theme.split(' ')[1].upper()}")
 
 if has_data:
-    st.info(f"📁 **System Ready:** Data Loaded in variable 'df'. Tools Active: {len(tools)}")
+    st.info(f"📊 **Visual Analyst Ready:** Uploaded Data Active.")
 
 history = load_history(current_sess)
 current_messages = []
@@ -201,16 +206,15 @@ if prompt := st.chat_input("Enter command..."):
         st.markdown(prompt)
     save_message(current_sess, "user", prompt)
 
-    # --- SYSTEM OVERRIDE PROMPT ---
+    # --- VISUAL AWARE PROMPT ---
     system_text = "You are Nexus."
     if has_data:
         system_text += """
-        [DATA MODE ACTIVE]
-        - A dataframe is loaded as variable `df`.
-        - You MUST use the `python_analysis` tool to inspect it.
-        - To see data: Run `print(df.head())`
-        - To get columns: Run `print(df.columns)`
-        - DO NOT guess. Run code to see the data.
+        [VISUAL MODE ACTIVE]
+        - You can PLOT data.
+        - To plot: Use `plt.plot()`, `plt.bar()`, or `sns.heatmap()`.
+        - DO NOT use `plt.show()`. Just create the plot, and I will handle rendering.
+        - Example: "df['column'].hist()" followed by "plt.title('My Hist')"
         """
     else:
         system_text += " If no file is loaded, use 'tavily' for web search."
