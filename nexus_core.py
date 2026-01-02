@@ -21,23 +21,11 @@ from langchain_core.tools import Tool
 from nexus_db import init_db, save_message, load_history, clear_session, save_setting, load_setting, get_all_sessions
 from themes import THEMES, inject_theme_css
 
-# --- 1. CONFIGURATION (Run First) ---
+# --- 1. PAGE CONFIG (Must be absolute first) ---
 st.set_page_config(page_title="Nexus AI", layout="wide", page_icon="⚡")
 
-TAVILY_API_KEY = st.secrets.get("TAVILY_API_KEY")
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY")
 
-if not TAVILY_API_KEY or not GROQ_API_KEY:
-    st.error("⚠️ System Halted: Missing API Keys. Please add them to Streamlit Secrets.")
-    st.stop()
-
-os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
-os.environ["GROQ_API_KEY"] = GROQ_API_KEY
-
-MODEL_NAME = "llama-3.3-70b-versatile"
-
-
-# --- 2. CORE CLASSES ---
+# --- 2. CLASS DEFINITIONS ---
 class DataEngine:
     """Handles file processing for ALL file types."""
 
@@ -45,6 +33,8 @@ class DataEngine:
         self.df = None
         self.file_content = None
         self.file_type = None
+        # We initialize REPL here. Note: This object is not pickle-friendly,
+        # so sometimes session_state issues arise if not handled carefully.
         self.repl = PythonREPL()
 
     def load_file(self, uploaded_file):
@@ -76,7 +66,6 @@ class DataEngine:
 
     def run_python_analysis(self, code: str):
         try:
-            # Inject variables into local scope for the AI
             local_scope = {
                 "df": self.df,
                 "file_content": self.file_content,
@@ -90,32 +79,51 @@ class DataEngine:
             return f"Execution Error: {str(e)}"
 
 
-# --- 3. STATE INITIALIZATION (The Fix) ---
-def init_state():
-    """Ensures all session state variables exist before the UI loads."""
+# --- 3. SAFETY INITIALIZATION FUNCTION ---
+def get_data_engine():
+    """Get the data engine from state, or create it if missing."""
     if "data_engine" not in st.session_state:
         st.session_state.data_engine = DataEngine()
+    return st.session_state.data_engine
 
+
+def get_session_id():
+    """Get current session ID or create new one."""
     if "current_session_id" not in st.session_state:
         st.session_state.current_session_id = f"Session-{uuid.uuid4().hex[:4]}"
+    return st.session_state.current_session_id
 
 
-# EXECUTE INIT IMMEDIATELY
-init_state()
+# FORCE INITIALIZATION NOW
+engine = get_data_engine()
+current_sess = get_session_id()
 init_db()
 
-# --- 4. UI & LOGIC ---
+# --- 4. SECRETS CHECK ---
+TAVILY_API_KEY = st.secrets.get("TAVILY_API_KEY")
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY")
+
+if not TAVILY_API_KEY or not GROQ_API_KEY:
+    st.error("⚠️ System Halted: Missing API Keys. Please add them to Streamlit Secrets.")
+    st.stop()
+
+os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
+os.environ["GROQ_API_KEY"] = GROQ_API_KEY
+MODEL_NAME = "llama-3.3-70b-versatile"
+
+# --- 5. UI SETUP ---
 current_theme_setting = load_setting("theme", "🌿 Eywa (Avatar)")
 inject_theme_css(current_theme_setting)
 theme_data = THEMES.get(current_theme_setting, THEMES["🌿 Eywa (Avatar)"])
 
-# Sidebar
+# --- 6. SIDEBAR ---
 with st.sidebar:
     st.title("⚙️ NEXUS HQ")
 
     uploaded_file = st.file_uploader("📂 Upload Data / Files", type=None)
     if uploaded_file:
-        status = st.session_state.data_engine.load_file(uploaded_file)
+        # USE THE SAFE ACCESSOR 'engine' (defined above), NOT st.session_state directly
+        status = engine.load_file(uploaded_file)
         if "Error" in status:
             st.error(status)
         else:
@@ -128,13 +136,13 @@ with st.sidebar:
         st.session_state.current_session_id = f"Session-{uuid.uuid4().hex[:4]}"
         st.rerun()
     if col2.button("🗑️ Clear"):
-        clear_session(st.session_state.current_session_id)
+        clear_session(current_sess)
         st.rerun()
 
     st.markdown("### 🕒 History")
     all_sessions = get_all_sessions()
     for sess in all_sessions[:8]:
-        if sess == st.session_state.current_session_id:
+        if sess == current_sess:
             st.markdown(f"**🔹 {sess}**")
         else:
             if st.button(f"{sess}", key=f"btn_{sess}"):
@@ -144,16 +152,17 @@ with st.sidebar:
     st.divider()
     web_search_on = st.toggle("🌐 Web Search", value=True)
 
-# AI Graph & Tools
+# --- 7. AI GRAPH & TOOLS ---
 tavily_tool = TavilySearchResults(max_results=2)
 tools = [tavily_tool]
 
 
 def python_analysis_tool(code: str):
-    return st.session_state.data_engine.run_python_analysis(code)
+    # Use the safe instance 'engine'
+    return engine.run_python_analysis(code)
 
 
-if st.session_state.data_engine.df is not None or st.session_state.data_engine.file_content is not None:
+if engine.df is not None or engine.file_content is not None:
     tools.append(Tool(
         name="python_analysis",
         func=python_analysis_tool,
@@ -186,10 +195,10 @@ else:
 
 app = workflow.compile()
 
-# Chat Interface
-st.title(f"NEXUS // {selected_theme.split(' ')[1].upper() if 'selected_theme' in locals() else 'SYSTEM'}")
+# --- 8. CHAT INTERFACE ---
+st.title(f"NEXUS // {current_theme_setting.split(' ')[1].upper()}")
 
-history = load_history(st.session_state.current_session_id)
+history = load_history(current_sess)
 current_messages = []
 
 for msg in history:
@@ -205,7 +214,7 @@ for msg in history:
 if prompt := st.chat_input("Enter command..."):
     with st.chat_message("user", avatar=theme_data["user_avatar"]):
         st.markdown(prompt)
-    save_message(st.session_state.current_session_id, "user", prompt)
+    save_message(current_sess, "user", prompt)
 
     system_text = """You are Nexus.
     1. If user uploads a file, use 'python_analysis'.
@@ -232,7 +241,7 @@ if prompt := st.chat_input("Enter command..."):
 
             if final_response:
                 status_box.update(label="Complete", state="complete", expanded=False)
-                save_message(st.session_state.current_session_id, "assistant", final_response)
+                save_message(current_sess, "assistant", final_response)
             else:
                 status_box.update(label="Failed", state="error")
                 st.error("No response.")
