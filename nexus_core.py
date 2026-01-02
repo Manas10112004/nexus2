@@ -15,7 +15,9 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from typing import TypedDict, Annotated, Sequence
 import operator
 from langchain_core.messages import BaseMessage
-from langchain_core.tools import Tool
+# CHANGED: Import StructuredTool and pydantic for strict validation
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
 
 # Database Imports
 from nexus_db import init_db, save_message, load_history, clear_session, save_setting, load_setting, get_all_sessions
@@ -36,10 +38,9 @@ os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 MODEL_NAME = "llama-3.3-70b-versatile"
 
 
-# --- 2. DATA ENGINE (NOW WITH VISUALS) ---
+# --- 2. DATA ENGINE ---
 class DataEngine:
     def __init__(self):
-        # Persistent Scope with Visualization Tools
         self.scope = {
             "pd": pd,
             "plt": plt,
@@ -52,8 +53,6 @@ class DataEngine:
     def load_file(self, uploaded_file):
         try:
             name = uploaded_file.name
-
-            # 1. LOAD DATAFRAME
             if name.endswith(('.csv', '.xlsx', '.xls', '.json')):
                 if name.endswith('.csv'):
                     self.df = pd.read_csv(uploaded_file)
@@ -61,49 +60,40 @@ class DataEngine:
                     self.df = pd.read_excel(uploaded_file)
                 elif name.endswith('.json'):
                     self.df = pd.read_json(uploaded_file)
-
-                # INJECT INTO SCOPE
                 self.scope["df"] = self.df
-                return f"✅ Data Loaded: {len(self.df)} rows. (Accessible as 'df')"
-
-            # 2. LOAD TEXT
-            elif name.endswith(('.txt', '.py', '.md', '.log', '.yaml', '.xml')):
+                return f"✅ Data Loaded: {len(self.df)} rows."
+            elif name.endswith(('.txt', '.py', '.md', '.log', '.yaml')):
                 stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
                 self.file_content = stringio.read()
                 self.scope["file_content"] = self.file_content
-                return f"✅ Text Loaded: {len(self.file_content)} chars. (Accessible as 'file_content')"
-
+                return f"✅ Text Loaded: {len(self.file_content)} chars."
             else:
                 return f"⚠️ Binary file '{name}' (Limited Access)."
         except Exception as e:
             return f"❌ Error: {str(e)}"
 
     def run_python_analysis(self, code: str):
-        # CAPTURE OUTPUT
         old_stdout = sys.stdout
         redirected_output = sys.stdout = StringIO()
-
         try:
-            # 1. EXECUTE CODE
+            # Execute code
             exec(code, self.scope)
             result = redirected_output.getvalue()
 
-            # 2. CHECK FOR PLOTS (The Visual Upgrade)
-            # If the code created a figure, we render it directly to Streamlit
+            # Check for Plots
             if plt.get_fignums():
-                st.pyplot(plt)  # Render plot
-                plt.clf()  # Clear plot to prevent overlapping next time
+                st.pyplot(plt)
+                plt.clf()
                 return f"Output:\n{result}\n[Visual Chart Rendered to UI]"
 
             return f"Output:\n{result}" if result else "Code executed successfully."
-
         except Exception as e:
             return f"❌ Execution Error: {str(e)}"
         finally:
             sys.stdout = old_stdout
 
 
-# --- 3. INIT STATE ---
+# --- 3. STATE INIT ---
 if "data_engine" not in st.session_state:
     st.session_state.data_engine = DataEngine()
 engine = st.session_state.data_engine
@@ -122,7 +112,6 @@ theme_data = THEMES.get(current_theme, THEMES["🌿 Eywa (Avatar)"])
 with st.sidebar:
     st.title("⚙️ NEXUS HQ")
     uploaded_file = st.file_uploader("📂 Upload File", type=None)
-
     if uploaded_file:
         status = engine.load_file(uploaded_file)
         if "Error" in status:
@@ -144,22 +133,29 @@ with st.sidebar:
             st.session_state.current_session_id = s
             st.rerun()
 
-# --- 5. TOOLS & AGENT ---
-tavily = TavilySearchResults(max_results=2)
-tools = [tavily]
 
-has_data = "df" in engine.scope or "file_content" in engine.scope
+# --- 5. STRICT SCHEMA DEFINITION (The Fix) ---
+# We define exactly what the input looks like so the model can't mess it up
+class PythonInput(BaseModel):
+    code: str = Field(description="The valid Python code to execute. access dataframe with 'df'.")
 
 
 def python_analysis_tool(code: str):
     return engine.run_python_analysis(code)
 
 
+tavily = TavilySearchResults(max_results=2)
+tools = [tavily]
+
+has_data = "df" in engine.scope or "file_content" in engine.scope
+
 if has_data:
-    tools.append(Tool(
-        name="python_analysis",
+    # Use StructuredTool to enforce the schema
+    tools.append(StructuredTool.from_function(
         func=python_analysis_tool,
-        description="EXECUTE PYTHON. Variables: 'df' (pandas), 'file_content' (str). To PLOT: use plt.plot() or sns.heatmap()."
+        name="python_analysis",
+        description="Run Python code. Use 'df' for data. Print outputs.",
+        args_schema=PythonInput  # <--- This fixes the error
     ))
 
 llm = ChatGroq(model=MODEL_NAME, temperature=0.1)
@@ -186,7 +182,7 @@ app = workflow.compile()
 st.title(f"NEXUS // {current_theme.split(' ')[1].upper()}")
 
 if has_data:
-    st.info(f"📊 **Visual Analyst Ready:** Uploaded Data Active.")
+    st.info(f"📊 **Visual Analyst Ready.**")
 
 history = load_history(current_sess)
 current_messages = []
@@ -206,15 +202,13 @@ if prompt := st.chat_input("Enter command..."):
         st.markdown(prompt)
     save_message(current_sess, "user", prompt)
 
-    # --- VISUAL AWARE PROMPT ---
     system_text = "You are Nexus."
     if has_data:
         system_text += """
         [VISUAL MODE ACTIVE]
-        - You can PLOT data.
         - To plot: Use `plt.plot()`, `plt.bar()`, or `sns.heatmap()`.
-        - DO NOT use `plt.show()`. Just create the plot, and I will handle rendering.
-        - Example: "df['column'].hist()" followed by "plt.title('My Hist')"
+        - DO NOT use `plt.show()`. Just create the plot.
+        - Always use 'df' variable.
         """
     else:
         system_text += " If no file is loaded, use 'tavily' for web search."
