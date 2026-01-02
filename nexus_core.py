@@ -34,8 +34,8 @@ if not TAVILY_API_KEY or not GROQ_API_KEY:
 
 os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY
-MODEL_NAME = "llama-3.3-70b-versatile"
-
+#MODEL_NAME = "llama-3.3-70b-versatile"
+MODEL_NAME = "llama-3.1-8b-instant"
 
 # --- 2. DATA ENGINE ---
 class DataEngine:
