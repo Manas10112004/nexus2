@@ -61,3 +61,19 @@ def load_setting(key, default_value):
     if response.data:
         return response.data[0]['value']
     return default_value
+
+
+def get_all_sessions():
+    """Fetches unique session IDs from the database, sorted by latest activity."""
+    # We select session_id and created_at to sort them.
+    # Note: In a large production app, you would want a dedicated 'sessions' table.
+    response = supabase.table("messages").select("session_id, created_at").order("created_at", desc=True).execute()
+
+    seen = set()
+    sessions = []
+    for row in response.data:
+        s_id = row['session_id']
+        if s_id not in seen:
+            seen.add(s_id)
+            sessions.append(s_id)
+    return sessions
