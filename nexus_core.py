@@ -295,10 +295,14 @@ if prompt := st.chat_input("Enter command..."):
 
     system_text = "You are Nexus."
     if has_data:
+        # --- THE FIX: STRICT VISUAL INSTRUCTIONS ---
         system_text += """
-        [DATA MODE]
+        [DATA MODE ACTIVE]
         1. Variable 'df' is loaded.
-        2. Plotting: `plt.plot()`. NO `plt.show()`.
+        2. IF ASKED FOR A PLOT: You MUST write Python code to create it.
+        3. Use `plt.figure()` first, then `sns.heatmap()` or `plt.plot()`.
+        4. DO NOT explain how to plot. DO NOT say "I can plot this." JUST RUN THE CODE.
+        5. DO NOT use `plt.show()`.
         """
     else:
         system_text += " If no file, use 'tavily'."
