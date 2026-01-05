@@ -75,7 +75,7 @@ MODEL_SMART = "llama-3.3-70b-versatile"
 MODEL_FAST = "llama-3.1-8b-instant"
 
 
-# --- 2. DATA ENGINE (SMART ERROR HANDLING) ---
+# --- 2. DATA ENGINE (WITH CHEAT SHEET) ---
 class DataEngine:
     def __init__(self):
         self.scope = {
@@ -85,7 +85,7 @@ class DataEngine:
             "st": st
         }
         self.df = None
-        self.file_content = None
+        self.column_str = ""  # Store columns as string for the AI
 
     def load_file(self, uploaded_file):
         try:
@@ -97,8 +97,13 @@ class DataEngine:
                     self.df = pd.read_excel(uploaded_file)
                 elif name.endswith('.json'):
                     self.df = pd.read_json(uploaded_file)
+
+                # --- THE FIX: PREPARE THE CHEAT SHEET ---
+                # We save the columns immediately so we can feed them to the AI later
+                self.column_str = ", ".join(list(self.df.columns))
                 self.scope["df"] = self.df
-                return f"✅ Data Loaded: {len(self.df)} rows."
+
+                return f"✅ Data Loaded: {len(self.df)} rows. Columns: {self.column_str}"
             elif name.endswith(('.txt', '.py', '.md', '.log', '.yaml')):
                 stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
                 self.file_content = stringio.read()
@@ -120,15 +125,14 @@ class DataEngine:
             if plt.get_fignums():
                 st.pyplot(plt)
                 plt.clf()
-                # 🛑 FORCE STOP SIGNAL
-                return f"Output:\n{result}\n[SYSTEM MSG: Chart Successfully Rendered. TASK COMPLETE. STOP NOW.]"
+                # 🛑 FORCE STOP SIGNAL (SIMPLIFIED FOR 8B MODEL)
+                return f"Output:\n{result}\n[CHART GENERATED]"
 
             return f"Output:\n{result}" if result else "Code executed successfully."
 
         except KeyError as e:
-            # 🧠 SMART FIX: Automatically tell AI the correct columns
-            columns = list(self.scope["df"].columns) if self.df is not None else "No Data"
-            return f"❌ Column Error: {str(e)}\n💡 HINT: Available columns are: {columns}. Use these EXACT names."
+            # Fallback hint if it still fails
+            return f"❌ Column Error: {str(e)}\n💡 VALID COLUMNS: {self.column_str}"
 
         except Exception as e:
             return f"❌ Execution Error: {str(e)}"
@@ -289,16 +293,18 @@ if prompt := st.chat_input("Enter command..."):
         st.markdown(prompt)
     save_message(current_sess, "user", prompt)
 
+    # --- CHEAT SHEET INJECTION ---
     system_text = "You are Nexus."
     if has_data:
-        # --- ANTI-LOOP SYSTEM PROMPT ---
-        system_text += """
+        # Dynamically inject the columns so the AI can't fail
+        cols = engine.column_str if engine.column_str else "Unknown"
+
+        system_text += f"""
         [DATA MODE ACTIVE]
         1. Variable 'df' is loaded.
-        2. CHECK COLUMNS FIRST: If unsure of column names, run `print(df.columns)` first.
-        3. IF YOU GET AN ERROR: Read the error message. It contains the correct column names.
-        4. PLOTTING: Use `plt.figure()` -> `plt.plot()` -> NO `plt.show()`.
-        5. STOPPING RULE: If the tool says "[SYSTEM MSG: Chart Successfully Rendered]", YOU MUST STOP.
+        2. **VALID COLUMNS:** [{cols}] <-- USE THESE EXACT NAMES.
+        3. PLOTTING: Use `plt.figure()` -> `plt.plot()` -> NO `plt.show()`.
+        4. STOPPING RULE: If the tool says "[CHART GENERATED]", YOU MUST STOP.
         """
     else:
         system_text += " If no file, use 'tavily'."
