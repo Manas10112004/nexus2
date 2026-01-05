@@ -81,18 +81,27 @@ def build_agent_graph(data_engine):
     init_keys()
 
     def agent_node(state):
-        # --- 1. SHORT-CIRCUIT LOGIC (The Anti-Loop Fix) ---
-        # If the tool just ran and succeeded, Force-Stop the LLM to prevent recursion.
+        # --- 1. SHORT-CIRCUIT LOGIC (The Anti-Loop & Visibility Fix) ---
         last_msg = state["messages"][-1]
+
         if isinstance(last_msg, ToolMessage):
             content = last_msg.content
-            # Check for the signals sent by nexus_engine.py
+
+            # Case A: Chart Created
             if "[CHART GENERATED]" in content:
-                # The chart is already in the engine buffer. Just reply text.
-                return {"messages": [AIMessage(content="I have plotted the data for you. (See chart above)")]}
+                return {"messages": [AIMessage(content="✅ Chart generated successfully. (See plot above)")]}
+
+            # Case B: Text Analysis (The Fix!)
             if "[ANALYSIS COMPLETE]" in content:
-                # The text output is in the tool message. Just point to it.
-                return {"messages": [AIMessage(content="I have completed the analysis. (See results above)")]}
+                # Extract the actual answer text to show the user
+                # We remove the system tags so the user just sees the data
+                clean_answer = content.replace("[ANALYSIS COMPLETE]", "").replace("Output:\n", "").strip()
+
+                # If the answer is still empty (rare), provide a fallback
+                if not clean_answer:
+                    clean_answer = "Analysis finished, but no text output was captured. (Did you print?)"
+
+                return {"messages": [AIMessage(content=f"**Analysis Results:**\n\n```\n{clean_answer}\n```")]}
 
         # --- 2. STANDARD LLM EXECUTION ---
         has_data = "df" in data_engine.scope
@@ -106,7 +115,6 @@ def build_agent_graph(data_engine):
                     tools = get_tools(data_engine)
                     key = os.environ["GROQ_API_KEY"]
 
-                    # parallel_tool_calls=False is crucial for stability
                     llm = ChatGroq(model=model, temperature=0.1, api_key=key).bind_tools(tools,
                                                                                          parallel_tool_calls=False)
 
@@ -117,7 +125,6 @@ def build_agent_graph(data_engine):
                         rotate_groq_key();
                         continue
                     elif "400" in str(e):
-                        # Skip model glitches
                         continue
                     break
 
