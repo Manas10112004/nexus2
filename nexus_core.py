@@ -62,7 +62,7 @@ MODEL_SMART = "llama-3.3-70b-versatile"
 MODEL_FAST = "llama-3.1-8b-instant"
 
 
-# --- 2. DATA ENGINE (WITH SELF-HEALING) ---
+# --- 2. DATA ENGINE (WITH ADVANCED SELF-HEALING) ---
 class DataEngine:
     def __init__(self):
         self.scope = {
@@ -99,31 +99,33 @@ class DataEngine:
             return f"❌ Error: {str(e)}"
 
     def _heal_code(self, code: str) -> str:
-        """Autocorrects column names in the code (case-insensitive fix)."""
+        """Autocorrects code to prevent common crashes."""
         if self.df is None: return code
 
-        real_cols = list(self.df.columns)
-        # Create a map of lowercase -> RealName (e.g. 'city': 'City')
-        col_map = {c.lower(): c for c in real_cols}
+        # 1. FIX: Numeric Columns Only for Correlation (Prevents 'string to float' crash)
+        if ".corr()" in code and "numeric_only" not in code:
+            print("🔧 Auto-Healing: Forced numeric_only for correlation")
+            # Replace basic .corr() with strict numeric version
+            code = code.replace(".corr()", ".select_dtypes(include=['number']).corr()")
 
-        # Regex to find usages like df['city'] or df["city"]
+        # 2. FIX: Column Name Typos (Case-Insensitive)
+        real_cols = list(self.df.columns)
+        col_map = {c.lower(): c for c in real_cols}
         pattern = r"df\[['\"](.*?)['\"]\]"
 
         def replace_match(match):
             col_name = match.group(1)
             lower_name = col_name.lower()
-            # If the exact name isn't there, but a case-insensitive match exists, swap it
             if col_name not in real_cols and lower_name in col_map:
                 correct_name = col_map[lower_name]
-                print(f"🔧 Auto-Healing: Swapped '{col_name}' for '{correct_name}'")
                 return f"df['{correct_name}']"
-            return match.group(0)  # No change
+            return match.group(0)
 
         healed_code = re.sub(pattern, replace_match, code)
         return healed_code
 
     def run_python_analysis(self, code: str):
-        # 1. Self-Heal the code before execution
+        # Apply Auto-Healing
         code = self._heal_code(code)
 
         old_stdout = sys.stdout
@@ -141,7 +143,6 @@ class DataEngine:
             return f"Output:\n{result}" if result else "Code executed successfully."
 
         except KeyError as e:
-            # Fallback if healing didn't work
             cols = self.column_str if self.column_str else "Data Not Loaded"
             return f"❌ Column Error: {str(e)}\n💡 AVAILABLE COLUMNS: {cols}"
 
@@ -241,7 +242,7 @@ def agent_node(state):
             except Exception as e:
                 last_error = e
                 if "429" in str(e): rotate_groq_key(); continue
-                break  # Try next model if not rate limit
+                break
 
     return {"messages": [AIMessage(content=f"❌ System Exhausted. Error: {str(last_error)}")], "final": True}
 
@@ -271,7 +272,7 @@ if prompt := st.chat_input("Enter command..."):
         st.markdown(prompt)
     save_message(current_sess, "user", prompt)
 
-    # REFRESH COLUMNS IF NEEDED (The Fix for Stale Memory)
+    # REFRESH COLUMNS (Fix for Stale Memory)
     if engine.df is not None and not engine.column_str:
         engine.column_str = ", ".join(list(engine.df.columns))
 
