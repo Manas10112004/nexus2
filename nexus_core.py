@@ -4,6 +4,7 @@ import os
 import time
 import uuid
 import sys
+import re
 import matplotlib.pyplot as plt
 import seaborn as sns
 from io import StringIO
@@ -22,32 +23,27 @@ from pydantic import BaseModel, Field
 from nexus_db import init_db, save_message, load_history, clear_session, save_setting, load_setting, get_all_sessions
 from themes import THEMES, inject_theme_css
 
-# --- 1. CONFIGURATION & KEY ROTATION SYSTEM ---
+# --- 1. CONFIGURATION & KEYS ---
 st.set_page_config(page_title="Nexus AI", layout="wide", page_icon="⚡")
 
-# LOAD KEYS (Comma-Separated)
 raw_groq = st.secrets.get("GROQ_API_KEYS", "")
 raw_tavily = st.secrets.get("TAVILY_API_KEYS", "")
 
-# Convert to Lists
 GROQ_KEYS = [k.strip() for k in raw_groq.split(",") if k.strip()]
 TAVILY_KEYS = [k.strip() for k in raw_tavily.split(",") if k.strip()]
 
 if not GROQ_KEYS or not TAVILY_KEYS:
     st.error("⚠️ System Halted: Missing API Keys in Secrets.")
-    st.info("Please paste the 'GROQ_API_KEYS' and 'TAVILY_API_KEYS' block into your Streamlit Secrets.")
     st.stop()
 
-# STATE: Track which key is currently active
+# Key Rotation State
 if "groq_idx" not in st.session_state: st.session_state.groq_idx = 0
 if "tavily_idx" not in st.session_state: st.session_state.tavily_idx = 0
 
 
 def get_current_keys():
-    """Sets the environment variables to the CURRENT active key index."""
     g_key = GROQ_KEYS[st.session_state.groq_idx % len(GROQ_KEYS)]
     t_key = TAVILY_KEYS[st.session_state.tavily_idx % len(TAVILY_KEYS)]
-
     os.environ["GROQ_API_KEY"] = g_key
     os.environ["TAVILY_API_KEY"] = t_key
     return g_key, t_key
@@ -60,22 +56,13 @@ def rotate_groq_key():
     return new_key
 
 
-def rotate_tavily_key():
-    st.session_state.tavily_idx = (st.session_state.tavily_idx + 1) % len(TAVILY_KEYS)
-    new_key = TAVILY_KEYS[st.session_state.tavily_idx]
-    os.environ["TAVILY_API_KEY"] = new_key
-    return new_key
-
-
-# Initialize Keys
 get_current_keys()
 
-# MODELS
 MODEL_SMART = "llama-3.3-70b-versatile"
 MODEL_FAST = "llama-3.1-8b-instant"
 
 
-# --- 2. DATA ENGINE (WITH CHEAT SHEET) ---
+# --- 2. DATA ENGINE (WITH SELF-HEALING) ---
 class DataEngine:
     def __init__(self):
         self.scope = {
@@ -85,7 +72,7 @@ class DataEngine:
             "st": st
         }
         self.df = None
-        self.column_str = ""  # Store columns as string for the AI
+        self.column_str = ""
 
     def load_file(self, uploaded_file):
         try:
@@ -98,11 +85,8 @@ class DataEngine:
                 elif name.endswith('.json'):
                     self.df = pd.read_json(uploaded_file)
 
-                # --- THE FIX: PREPARE THE CHEAT SHEET ---
-                # We save the columns immediately so we can feed them to the AI later
                 self.column_str = ", ".join(list(self.df.columns))
                 self.scope["df"] = self.df
-
                 return f"✅ Data Loaded: {len(self.df)} rows. Columns: {self.column_str}"
             elif name.endswith(('.txt', '.py', '.md', '.log', '.yaml')):
                 stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
@@ -114,25 +98,52 @@ class DataEngine:
         except Exception as e:
             return f"❌ Error: {str(e)}"
 
+    def _heal_code(self, code: str) -> str:
+        """Autocorrects column names in the code (case-insensitive fix)."""
+        if self.df is None: return code
+
+        real_cols = list(self.df.columns)
+        # Create a map of lowercase -> RealName (e.g. 'city': 'City')
+        col_map = {c.lower(): c for c in real_cols}
+
+        # Regex to find usages like df['city'] or df["city"]
+        pattern = r"df\[['\"](.*?)['\"]\]"
+
+        def replace_match(match):
+            col_name = match.group(1)
+            lower_name = col_name.lower()
+            # If the exact name isn't there, but a case-insensitive match exists, swap it
+            if col_name not in real_cols and lower_name in col_map:
+                correct_name = col_map[lower_name]
+                print(f"🔧 Auto-Healing: Swapped '{col_name}' for '{correct_name}'")
+                return f"df['{correct_name}']"
+            return match.group(0)  # No change
+
+        healed_code = re.sub(pattern, replace_match, code)
+        return healed_code
+
     def run_python_analysis(self, code: str):
+        # 1. Self-Heal the code before execution
+        code = self._heal_code(code)
+
         old_stdout = sys.stdout
         redirected_output = sys.stdout = StringIO()
         try:
-            plt.clf()  # Clear previous plots
+            plt.clf()
             exec(code, self.scope)
             result = redirected_output.getvalue()
 
             if plt.get_fignums():
                 st.pyplot(plt)
                 plt.clf()
-                # 🛑 FORCE STOP SIGNAL (SIMPLIFIED FOR 8B MODEL)
                 return f"Output:\n{result}\n[CHART GENERATED]"
 
             return f"Output:\n{result}" if result else "Code executed successfully."
 
         except KeyError as e:
-            # Fallback hint if it still fails
-            return f"❌ Column Error: {str(e)}\n💡 VALID COLUMNS: {self.column_str}"
+            # Fallback if healing didn't work
+            cols = self.column_str if self.column_str else "Data Not Loaded"
+            return f"❌ Column Error: {str(e)}\n💡 AVAILABLE COLUMNS: {cols}"
 
         except Exception as e:
             return f"❌ Execution Error: {str(e)}"
@@ -141,8 +152,7 @@ class DataEngine:
 
 
 # --- 3. STATE INIT ---
-if "data_engine" not in st.session_state:
-    st.session_state.data_engine = DataEngine()
+if "data_engine" not in st.session_state: st.session_state.data_engine = DataEngine()
 engine = st.session_state.data_engine
 
 if "current_session_id" not in st.session_state:
@@ -158,8 +168,7 @@ theme_data = THEMES.get(current_theme, THEMES["🌿 Eywa (Avatar)"])
 
 with st.sidebar:
     st.title("⚙️ NEXUS HQ")
-    st.caption(f"🔑 **Groq Key:** {st.session_state.groq_idx + 1}/{len(GROQ_KEYS)}")
-    st.caption(f"🔑 **Tavily Key:** {st.session_state.tavily_idx + 1}/{len(TAVILY_KEYS)}")
+    st.caption(f"Keys: Groq({st.session_state.groq_idx + 1}) | Tavily({st.session_state.tavily_idx + 1})")
 
     uploaded_file = st.file_uploader("📂 Upload File", type=None)
     if uploaded_file:
@@ -172,7 +181,6 @@ with st.sidebar:
     if st.button("🧹 Clear Plots"):
         plt.clf()
         st.pyplot(plt)
-        st.success("Visual memory cleared.")
 
     st.divider()
     if st.button("➕ New Chat"):
@@ -189,9 +197,9 @@ with st.sidebar:
             st.rerun()
 
 
-# --- 5. TOOLS ---
+# --- 5. AGENT SETUP ---
 class PythonInput(BaseModel):
-    code: str = Field(description="Python code to run. Use 'df'.")
+    code: str = Field(description="Python code. Use 'df'.")
 
 
 def python_analysis_tool(code: str):
@@ -201,64 +209,41 @@ def python_analysis_tool(code: str):
 has_data = "df" in engine.scope or "file_content" in engine.scope
 
 
-# --- 6. AGENT NODE (Failover + Multi-Key) ---
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
 
 def get_fresh_tools():
-    """Refreshes tools to pick up any environment variable changes"""
     get_current_keys()
-    t_tool = TavilySearchResults(max_results=2)
-    tool_list = [t_tool]
+    tools = [TavilySearchResults(max_results=2)]
     if has_data:
-        tool_list.append(StructuredTool.from_function(
+        tools.append(StructuredTool.from_function(
             func=python_analysis_tool,
             name="python_analysis",
             description="Run Python code.",
             args_schema=PythonInput
         ))
-    return tool_list
+    return tools
 
 
 def agent_node(state):
     primary_model = MODEL_SMART if has_data else MODEL_FAST
-    models_to_try = [primary_model, MODEL_FAST]
-    if primary_model == MODEL_FAST: models_to_try = [MODEL_FAST]
+    models = [primary_model, MODEL_FAST] if primary_model != MODEL_FAST else [MODEL_FAST]
 
     last_error = None
-
-    for model_name in models_to_try:
-        # Retry with all keys
+    for model in models:
         for i in range(len(GROQ_KEYS)):
             try:
                 tools = get_fresh_tools()
-                current_key = os.environ["GROQ_API_KEY"]
-
-                llm = ChatGroq(model=model_name, temperature=0.1, api_key=current_key).bind_tools(tools)
-                response = llm.invoke(state["messages"])
-                return {"messages": [response]}
-
+                key = os.environ["GROQ_API_KEY"]
+                llm = ChatGroq(model=model, temperature=0.1, api_key=key).bind_tools(tools)
+                return {"messages": [llm.invoke(state["messages"])]}
             except Exception as e:
-                error_str = str(e)
                 last_error = e
+                if "429" in str(e): rotate_groq_key(); continue
+                break  # Try next model if not rate limit
 
-                if "429" in error_str or "Rate limit" in error_str:
-                    print(f"⚠️ Key #{st.session_state.groq_idx + 1} hit limit. Rotating...")
-                    rotate_groq_key()
-                    continue
-                elif "401" in error_str:
-                    print(f"⚠️ Key #{st.session_state.groq_idx + 1} invalid. Rotating...")
-                    rotate_groq_key()
-                    continue
-                else:
-                    # Non-key error, try next model
-                    print(f"❌ Model Error {model_name}: {error_str}")
-                    break
-
-    return {"messages": [
-        AIMessage(content=f"❌ **System Exhausted:** All keys/models failed. Last Error: {str(last_error)}")],
-            "final": True}
+    return {"messages": [AIMessage(content=f"❌ System Exhausted. Error: {str(last_error)}")], "final": True}
 
 
 workflow = StateGraph(AgentState)
@@ -269,42 +254,35 @@ workflow.add_conditional_edges("agent", tools_condition)
 workflow.add_edge("tools", "agent")
 app = workflow.compile()
 
-# --- 7. CHAT UI ---
+# --- 6. CHAT UI ---
 st.title(f"NEXUS // {current_theme.split(' ')[1].upper()}")
-
-if has_data:
-    st.info(f"📊 **Analyst Mode:** Active")
 
 history = load_history(current_sess)
 current_messages = []
-
 for msg in history:
     role = "user" if msg["role"] == "user" else "assistant"
-    avatar = theme_data["user_avatar"] if role == "user" else theme_data["ai_avatar"]
-    with st.chat_message(role, avatar=avatar):
+    with st.chat_message(role, avatar=theme_data["user_avatar"] if role == "user" else theme_data["ai_avatar"]):
         st.markdown(msg["content"])
-    if role == "user":
-        current_messages.append(HumanMessage(content=msg["content"]))
-    else:
-        current_messages.append(AIMessage(content=msg["content"]))
+    current_messages.append(
+        HumanMessage(content=msg["content"]) if role == "user" else AIMessage(content=msg["content"]))
 
 if prompt := st.chat_input("Enter command..."):
     with st.chat_message("user", avatar=theme_data["user_avatar"]):
         st.markdown(prompt)
     save_message(current_sess, "user", prompt)
 
-    # --- CHEAT SHEET INJECTION ---
+    # REFRESH COLUMNS IF NEEDED (The Fix for Stale Memory)
+    if engine.df is not None and not engine.column_str:
+        engine.column_str = ", ".join(list(engine.df.columns))
+
     system_text = "You are Nexus."
     if has_data:
-        # Dynamically inject the columns so the AI can't fail
-        cols = engine.column_str if engine.column_str else "Unknown"
-
         system_text += f"""
-        [DATA MODE ACTIVE]
+        [DATA MODE]
         1. Variable 'df' is loaded.
-        2. **VALID COLUMNS:** [{cols}] <-- USE THESE EXACT NAMES.
-        3. PLOTTING: Use `plt.figure()` -> `plt.plot()` -> NO `plt.show()`.
-        4. STOPPING RULE: If the tool says "[CHART GENERATED]", YOU MUST STOP.
+        2. VALID COLUMNS: [{engine.column_str}]
+        3. PLOT: `plt.figure()` -> `plt.plot()` -> NO `plt.show()`.
+        4. STOP: If tool output says "[CHART GENERATED]", STOP immediately.
         """
     else:
         system_text += " If no file, use 'tavily'."
@@ -315,28 +293,22 @@ if prompt := st.chat_input("Enter command..."):
     with st.chat_message("assistant", avatar=theme_data["ai_avatar"]):
         status_box = st.status("Processing...", expanded=True)
         try:
-            final_response = ""
+            final_resp = ""
             for event in app.stream({"messages": current_messages}, config={"recursion_limit": 50},
                                     stream_mode="values"):
-                last_msg = event["messages"][-1]
+                msg = event["messages"][-1]
+                if isinstance(msg, ToolMessage): status_box.write(f"⚙️ Output: {msg.content[:200]}...")
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    for t in msg.tool_calls: status_box.write(f"⚙️ Calling: `{t['name']}`")
+                if isinstance(msg, AIMessage) and msg.content:
+                    final_resp = msg.content
+                    st.markdown(final_resp)
 
-                # --- LIVE DEBUGGING ---
-                if isinstance(last_msg, ToolMessage):
-                    status_box.write(f"⚙️ **Output:** {last_msg.content[:200]}...")
-
-                if hasattr(last_msg, 'tool_calls') and len(last_msg.tool_calls) > 0:
-                    for t in last_msg.tool_calls:
-                        status_box.write(f"⚙️ **Calling:** `{t['name']}`")
-
-                if isinstance(last_msg, AIMessage) and last_msg.content:
-                    final_response = last_msg.content
-                    st.markdown(final_response)
-
-            if final_response:
+            if final_resp:
                 status_box.update(label="Complete", state="complete", expanded=False)
-                save_message(current_sess, "assistant", final_response)
+                save_message(current_sess, "assistant", final_resp)
             else:
                 st.error("No response.")
         except Exception as e:
-            status_box.update(label="Error", state="error")
+            status_box.update(label="Error", state="error");
             st.error(f"Error: {e}")
