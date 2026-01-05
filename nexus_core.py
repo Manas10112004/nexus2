@@ -80,12 +80,13 @@ if prompt := st.chat_input("Enter command..."):
     has_data = "df" in engine.scope
     if has_data:
         system_text += f"""
-        [DATA MODE]
-        1. Variable 'df' is loaded.
-        2. VALID COLUMNS: [{engine.column_str}]
-        3. PLOTS: Use `plt.figure()` -> `plt.plot()`.
-        4. STOPPING: If tool output says "[ANALYSIS COMPLETE]" or "[CHART GENERATED]", STOP.
-        """
+            [DATA MODE ACTIVE]
+            1. Variable 'df' is loaded.
+            2. VALID COLUMNS: [{engine.column_str}]
+            3. NUMBERS/TEXT: You MUST use `print()`. Example: `print(df.shape)`.
+            4. CHARTS: Use `plt.figure()` -> `plt.plot()`.
+            5. DO NOT ASSIGN variables without printing them. The user cannot see variables.
+            """
     else:
         system_text += " If no file, use 'tavily'."
 

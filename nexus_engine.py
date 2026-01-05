@@ -9,11 +9,6 @@ from io import StringIO
 
 
 class DataEngine:
-    """
-    The Execution Engine.
-    Handles data loading, code sanitization, and figure capture.
-    """
-
     def __init__(self):
         self.scope = {
             "pd": pd,
@@ -24,7 +19,7 @@ class DataEngine:
         }
         self.df = None
         self.column_str = ""
-        self.latest_figure = None  # Buffer to store the plot
+        self.latest_figure = None
 
     def load_file(self, uploaded_file):
         try:
@@ -37,7 +32,6 @@ class DataEngine:
                 elif name.endswith('.json'):
                     self.df = pd.read_json(uploaded_file)
 
-                # Save columns for the Cheat Sheet
                 self.column_str = ", ".join(list(self.df.columns))
                 self.scope["df"] = self.df
                 return f"✅ Data Loaded: {len(self.df)} rows. Columns: {self.column_str}"
@@ -54,16 +48,15 @@ class DataEngine:
             return f"❌ Error: {str(e)}"
 
     def _heal_code(self, code: str) -> str:
-        """Autocorrects common DataFrame errors before execution."""
         if self.df is None: return code
 
-        # 1. FIX: Force numeric_only for correlations/means to prevent crashes on strings
+        # 1. FIX: Force numeric_only for stats
         if ".corr()" in code and "numeric_only" not in code:
             code = code.replace(".corr()", ".select_dtypes(include=['number']).corr()")
         if ".mean()" in code and "numeric_only" not in code:
             code = code.replace(".mean()", ".mean(numeric_only=True)")
 
-        # 2. FIX: Auto-correct column name typos (case-insensitive)
+        # 2. FIX: Auto-correct column names
         real_cols = list(self.df.columns)
         col_map = {c.lower(): c for c in real_cols}
         pattern = r"df\[['\"](.*?)['\"]\]"
@@ -80,18 +73,17 @@ class DataEngine:
         return healed_code
 
     def run_python_analysis(self, code: str):
-        """Executes code and captures figures/output."""
         code = self._heal_code(code)
 
         old_stdout = sys.stdout
         redirected_output = sys.stdout = StringIO()
 
         try:
-            plt.clf()  # Clear old plots
+            plt.clf()
             exec(code, self.scope)
             result = redirected_output.getvalue()
 
-            # 1. Check for Charts (Save to buffer, don't show yet)
+            # 1. Check for Charts
             if plt.get_fignums():
                 self.latest_figure = plt.gcf()
                 return f"Output:\n{result}\n[CHART GENERATED]"
@@ -100,11 +92,15 @@ class DataEngine:
             if result and len(result.strip()) > 0:
                 return f"Output:\n{result}\n[ANALYSIS COMPLETE]"
 
-            return f"Output:\n{result}" if result else "Code executed successfully."
+            # 3. SILENT ERROR FIX: If no output, force the AI to retry with print()
+            return "❌ Error: Code executed but printed nothing. You MUST use print() to show the answer."
 
         except KeyError as e:
             cols = self.column_str if self.column_str else "Data Not Loaded"
             return f"❌ Column Error: {str(e)}\n💡 AVAILABLE COLUMNS: {cols}"
+
+        except SyntaxError as e:
+            return f"❌ Syntax Error: {str(e)}\n💡 Hint: Do not use assignments inside functions. Use print(value) directly."
 
         except Exception as e:
             return f"❌ Execution Error: {str(e)}"
