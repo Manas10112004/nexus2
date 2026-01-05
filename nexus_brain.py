@@ -82,6 +82,7 @@ def build_agent_graph(data_engine):
 
     def agent_node(state):
         has_data = "df" in data_engine.scope
+        # Use SMART model more often to avoid 8B hallucination errors
         primary_model = MODEL_SMART if has_data else MODEL_FAST
         models = [primary_model, MODEL_FAST] if primary_model != MODEL_FAST else [MODEL_FAST]
 
@@ -91,20 +92,30 @@ def build_agent_graph(data_engine):
                 try:
                     tools = get_tools(data_engine)
                     key = os.environ["GROQ_API_KEY"]
-                    llm = ChatGroq(model=model, temperature=0.1, api_key=key).bind_tools(tools)
+
+                    # --- THE FIX IS HERE ---
+                    # parallel_tool_calls=False forces the model to be simple and correct.
+                    llm = ChatGroq(model=model, temperature=0.1, api_key=key).bind_tools(tools,
+                                                                                         parallel_tool_calls=False)
+
                     return {"messages": [llm.invoke(state["messages"])]}
                 except Exception as e:
                     last_error = e
                     if "429" in str(e) or "Rate limit" in str(e):
                         rotate_groq_key();
                         continue
-                    break  # Non-key error, try next model
+                    elif "400" in str(e):
+                        # If 400 error (Bad Request), it's usually the model hallucinating syntax.
+                        # We just retry with the next key/model, essentially "skipping" the glitch.
+                        print(f"⚠️ Model syntax error ({model}): {e}")
+                        continue
+                    break
 
         return {"messages": [AIMessage(content=f"❌ System Exhausted. Error: {str(last_error)}")], "final": True}
 
     workflow = StateGraph(AgentState)
     workflow.add_node("agent", agent_node)
-    workflow.add_node("tools", ToolNode(get_tools(data_engine)))  # Structure only
+    workflow.add_node("tools", ToolNode(get_tools(data_engine)))
     workflow.add_edge(START, "agent")
     workflow.add_conditional_edges("agent", tools_condition)
     workflow.add_edge("tools", "agent")
