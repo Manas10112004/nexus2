@@ -29,6 +29,7 @@ st.set_page_config(page_title="Nexus AI", layout="wide", page_icon="⚡")
 raw_groq = st.secrets.get("GROQ_API_KEYS", "")
 raw_tavily = st.secrets.get("TAVILY_API_KEYS", "")
 
+# Convert to Lists
 GROQ_KEYS = [k.strip() for k in raw_groq.split(",") if k.strip()]
 TAVILY_KEYS = [k.strip() for k in raw_tavily.split(",") if k.strip()]
 
@@ -69,12 +70,12 @@ def rotate_tavily_key():
 # Initialize Keys
 get_current_keys()
 
-# MODELS - Removed dead models
+# MODELS
 MODEL_SMART = "llama-3.3-70b-versatile"
 MODEL_FAST = "llama-3.1-8b-instant"
 
 
-# --- 2. DATA ENGINE ---
+# --- 2. DATA ENGINE (SMART ERROR HANDLING) ---
 class DataEngine:
     def __init__(self):
         self.scope = {
@@ -123,6 +124,12 @@ class DataEngine:
                 return f"Output:\n{result}\n[SYSTEM MSG: Chart Successfully Rendered. TASK COMPLETE. STOP NOW.]"
 
             return f"Output:\n{result}" if result else "Code executed successfully."
+
+        except KeyError as e:
+            # 🧠 SMART FIX: Automatically tell AI the correct columns
+            columns = list(self.scope["df"].columns) if self.df is not None else "No Data"
+            return f"❌ Column Error: {str(e)}\n💡 HINT: Available columns are: {columns}. Use these EXACT names."
+
         except Exception as e:
             return f"❌ Execution Error: {str(e)}"
         finally:
@@ -157,6 +164,11 @@ with st.sidebar:
             st.error(status)
         else:
             st.success(status)
+
+    if st.button("🧹 Clear Plots"):
+        plt.clf()
+        st.pyplot(plt)
+        st.success("Visual memory cleared.")
 
     st.divider()
     if st.button("➕ New Chat"):
@@ -284,9 +296,9 @@ if prompt := st.chat_input("Enter command..."):
         [DATA MODE ACTIVE]
         1. Variable 'df' is loaded.
         2. CHECK COLUMNS FIRST: If unsure of column names, run `print(df.columns)` first.
-        3. PLOTTING: Use `plt.figure()` -> `plt.plot()` -> NO `plt.show()`.
-        4. STOPPING RULE: If the tool says "[SYSTEM MSG: Chart Successfully Rendered]", YOU MUST STOP. Do not run code again.
-        5. If your code fails twice, stop and tell the user you cannot plot it.
+        3. IF YOU GET AN ERROR: Read the error message. It contains the correct column names.
+        4. PLOTTING: Use `plt.figure()` -> `plt.plot()` -> NO `plt.show()`.
+        5. STOPPING RULE: If the tool says "[SYSTEM MSG: Chart Successfully Rendered]", YOU MUST STOP.
         """
     else:
         system_text += " If no file, use 'tavily'."
@@ -302,9 +314,9 @@ if prompt := st.chat_input("Enter command..."):
                                     stream_mode="values"):
                 last_msg = event["messages"][-1]
 
-                # --- LIVE DEBUGGING: Show tool output to User ---
+                # --- LIVE DEBUGGING ---
                 if isinstance(last_msg, ToolMessage):
-                    status_box.write(f"⚙️ **Tool Output:** {last_msg.content[:200]}...")  # Show first 200 chars
+                    status_box.write(f"⚙️ **Output:** {last_msg.content[:200]}...")
 
                 if hasattr(last_msg, 'tool_calls') and len(last_msg.tool_calls) > 0:
                     for t in last_msg.tool_calls:
