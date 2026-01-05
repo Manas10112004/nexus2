@@ -22,23 +22,59 @@ from pydantic import BaseModel, Field
 from nexus_db import init_db, save_message, load_history, clear_session, save_setting, load_setting, get_all_sessions
 from themes import THEMES, inject_theme_css
 
-# --- 1. CONFIGURATION ---
+# --- 1. CONFIGURATION & KEY ROTATION SYSTEM ---
 st.set_page_config(page_title="Nexus AI", layout="wide", page_icon="⚡")
 
-TAVILY_API_KEY = st.secrets.get("TAVILY_API_KEY")
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY")
+# LOAD KEYS (Comma-Separated)
+raw_groq = st.secrets.get("GROQ_API_KEYS", "")
+raw_tavily = st.secrets.get("TAVILY_API_KEYS", "")
 
-if not TAVILY_API_KEY or not GROQ_API_KEY:
-    st.error("⚠️ System Halted: Missing API Keys.")
+# Convert to Lists
+GROQ_KEYS = [k.strip() for k in raw_groq.split(",") if k.strip()]
+TAVILY_KEYS = [k.strip() for k in raw_tavily.split(",") if k.strip()]
+
+if not GROQ_KEYS or not TAVILY_KEYS:
+    st.error("⚠️ System Halted: Missing API Keys in Secrets.")
+    st.info("Please paste the 'GROQ_API_KEYS' and 'TAVILY_API_KEYS' block into your Streamlit Secrets.")
     st.stop()
 
-os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
-os.environ["GROQ_API_KEY"] = GROQ_API_KEY
+# STATE: Track which key is currently active
+if "groq_idx" not in st.session_state: st.session_state.groq_idx = 0
+if "tavily_idx" not in st.session_state: st.session_state.tavily_idx = 0
 
-# --- INTELLIGENCE TIERS (SIMPLIFIED) ---
-# We ONLY use the two models guaranteed to be online.
-MODEL_SMART = "llama-3.3-70b-versatile"  # The Flagship
-MODEL_FAST = "llama-3.1-8b-instant"  # The Backup
+
+def get_current_keys():
+    """Sets the environment variables to the CURRENT active key index."""
+    g_key = GROQ_KEYS[st.session_state.groq_idx % len(GROQ_KEYS)]
+    t_key = TAVILY_KEYS[st.session_state.tavily_idx % len(TAVILY_KEYS)]
+
+    os.environ["GROQ_API_KEY"] = g_key
+    os.environ["TAVILY_API_KEY"] = t_key
+    return g_key, t_key
+
+
+def rotate_groq_key():
+    """Moves to the next Groq key in the list."""
+    st.session_state.groq_idx = (st.session_state.groq_idx + 1) % len(GROQ_KEYS)
+    new_key = GROQ_KEYS[st.session_state.groq_idx]
+    os.environ["GROQ_API_KEY"] = new_key
+    return new_key
+
+
+def rotate_tavily_key():
+    """Moves to the next Tavily key."""
+    st.session_state.tavily_idx = (st.session_state.tavily_idx + 1) % len(TAVILY_KEYS)
+    new_key = TAVILY_KEYS[st.session_state.tavily_idx]
+    os.environ["TAVILY_API_KEY"] = new_key
+    return new_key
+
+
+# Initialize Keys
+get_current_keys()
+
+# MODELS
+MODEL_SMART = "llama-3.3-70b-versatile"
+MODEL_FAST = "llama-3.1-8b-instant"
 
 
 # --- 2. DATA ENGINE ---
@@ -113,7 +149,10 @@ theme_data = THEMES.get(current_theme, THEMES["🌿 Eywa (Avatar)"])
 
 with st.sidebar:
     st.title("⚙️ NEXUS HQ")
-    st.caption("System Status: **Online**")
+
+    # Key Status Display
+    st.caption(f"🔑 **Groq Key:** {st.session_state.groq_idx + 1}/{len(GROQ_KEYS)}")
+    st.caption(f"🔑 **Tavily Key:** {st.session_state.tavily_idx + 1}/{len(TAVILY_KEYS)}")
 
     uploaded_file = st.file_uploader("📂 Upload File", type=None)
     if uploaded_file:
@@ -147,67 +186,84 @@ def python_analysis_tool(code: str):
     return engine.run_python_analysis(code)
 
 
-tavily = TavilySearchResults(max_results=2)
-tools = [tavily]
-
 has_data = "df" in engine.scope or "file_content" in engine.scope
-if has_data:
-    tools.append(StructuredTool.from_function(
-        func=python_analysis_tool,
-        name="python_analysis",
-        description="Run Python code.",
-        args_schema=PythonInput
-    ))
 
 
-# --- 6. AGENT NODE (SIMPLIFIED FAILOVER) ---
+# --- 6. AGENT NODE (ROTATION LOGIC) ---
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
 
+def get_fresh_tools():
+    """Re-creates tools so they pick up the NEW active key."""
+    get_current_keys()  # Refresh os.environ
+
+    t_tool = TavilySearchResults(max_results=2)
+    tool_list = [t_tool]
+
+    if has_data:
+        tool_list.append(StructuredTool.from_function(
+            func=python_analysis_tool,
+            name="python_analysis",
+            description="Run Python code.",
+            args_schema=PythonInput
+        ))
+    return tool_list
+
+
 def agent_node(state):
-    """
-    Attempt 1: Smart Model (Llama 3.3).
-    Attempt 2: Fast Model (Llama 3.1 8B).
-    """
+    # Strategy: Try SMART model with current key.
+    # If key fails (429), rotate key and retry.
+    # If all keys fail, switch to FAST model.
 
-    # Decide primary model
-    primary = MODEL_SMART if has_data else MODEL_FAST
+    primary_model = MODEL_SMART if has_data else MODEL_FAST
+    models_to_try = [primary_model, MODEL_FAST]
+    if primary_model == MODEL_FAST: models_to_try = [MODEL_FAST]
 
-    try:
-        # ATTEMPT 1: Primary Model
-        llm = ChatGroq(model=primary, temperature=0.1).bind_tools(tools)
-        response = llm.invoke(state["messages"])
-        return {"messages": [response]}
+    last_error = None
 
-    except Exception as e:
-        error_msg = str(e)
-        print(f"⚠️ Primary Model Failed: {error_msg}")
+    for model_name in models_to_try:
+        # Loop through ALL keys available
+        for i in range(len(GROQ_KEYS)):
+            try:
+                # 1. Get Fresh Tools & Key
+                tools = get_fresh_tools()
+                current_key = os.environ["GROQ_API_KEY"]
 
-        # ATTEMPT 2: Fallback to Fast Model
-        try:
-            fallback_llm = ChatGroq(model=MODEL_FAST, temperature=0.1).bind_tools(tools)
+                # 2. Invoke
+                llm = ChatGroq(model=model_name, temperature=0.1, api_key=current_key).bind_tools(tools)
+                response = llm.invoke(state["messages"])
+                return {"messages": [response]}
 
-            # Determine why we switched
-            reason = "High traffic"
-            if "decommissioned" in error_msg:
-                reason = "Model retired"
-            elif "429" in error_msg:
-                reason = "Rate limit"
+            except Exception as e:
+                error_str = str(e)
+                last_error = e
 
-            warning = AIMessage(content=f"⚠️ **Note:** Primary brain unavailable ({reason}). Switched to Fast Engine.")
-            response = fallback_llm.invoke(state["messages"])
-            return {"messages": [warning, response]}
+                # Handle Rate Limit -> Rotate Key
+                if "429" in error_str or "Rate limit" in error_str:
+                    print(f"⚠️ Key #{st.session_state.groq_idx + 1} hit limit. Rotating...")
+                    rotate_groq_key()
+                    continue  # Retry loop with new key
 
-        except Exception as final_e:
-            return {
-                "messages": [AIMessage(content=f"❌ **Critical Failure:** All models offline.\nError: {str(final_e)}")],
-                "final": True}
+                # Handle Unauthorized -> Rotate Key
+                elif "401" in error_str:
+                    print(f"⚠️ Key #{st.session_state.groq_idx + 1} invalid. Rotating...")
+                    rotate_groq_key()
+                    continue
+
+                else:
+                    # Not a key error? Probably a model error. Break key loop, try next model.
+                    print(f"❌ Non-Key Error on {model_name}: {error_str}")
+                    break
+
+    return {"messages": [AIMessage(
+        content=f"❌ **System Exhausted:** Used all {len(GROQ_KEYS)} keys and all models. Last Error: {str(last_error)}")],
+            "final": True}
 
 
 workflow = StateGraph(AgentState)
 workflow.add_node("agent", agent_node)
-workflow.add_node("tools", ToolNode(tools))
+workflow.add_node("tools", ToolNode(get_fresh_tools()))  # Dummy Init
 workflow.add_edge(START, "agent")
 workflow.add_conditional_edges("agent", tools_condition)
 workflow.add_edge("tools", "agent")
