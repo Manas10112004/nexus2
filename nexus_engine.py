@@ -3,11 +3,12 @@ import pandas as pd
 import numpy as np
 import sys
 import re
+import matplotlib
+# ✅ FIX: Force non-interactive backend for Cloud
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 from io import StringIO
-
-# --- IMPORT NEW MODULE ---
 from nexus_insights import InsightModule
 
 class DataEngine:
@@ -83,11 +84,9 @@ class DataEngine:
             plt.close('all')
             plt.figure(figsize=(10, 6))
 
-            # --- TWEAK: Ensure pandas prints full data for AI ---
             pd.set_option('display.max_rows', 20)
             pd.set_option('display.max_columns', None)
             pd.set_option('display.width', 1000)
-            # ----------------------------------------------------
 
             exec(code, self.scope)
             result = redirected_output.getvalue()

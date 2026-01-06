@@ -2,8 +2,8 @@ import streamlit as st
 import uuid
 import matplotlib.pyplot as plt
 import os
+import tempfile
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
-# ✅ REVERTED TO BUTTON LIBRARY
 from streamlit_mic_recorder import mic_recorder
 
 # --- CUSTOM MODULES ---
@@ -20,7 +20,6 @@ from nexus_voice import transcribe_audio
 # --- UI CONFIG ---
 st.set_page_config(page_title="Nexus AI", layout="wide", page_icon="⚡")
 
-# --- 1. SECURITY GATE ---
 if not check_password():
     st.stop()
 
@@ -55,10 +54,9 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 2. VOICE MODE (BUTTONS RESTORED) ---
+    # --- 2. VOICE MODE ---
     st.markdown("### 🎙️ Voice Input")
 
-    # ✅ SIMPLE RECORDER
     audio = mic_recorder(
         start_prompt="🎤 Start Recording",
         stop_prompt="⏹️ Stop Recording",
@@ -69,23 +67,18 @@ with st.sidebar:
 
     voice_text = ""
     if audio:
-        # Generate ID to prevent reprocessing same audio
         current_audio_id = hash(audio['bytes'])
         if current_audio_id != st.session_state.last_voice_id:
-            # Show status
             status_container = st.empty()
             status_container.info("Transcribing...")
 
-            # Transcribe
-            voice_text = transcribe_audio(audio['bytes'])
+            # ✅ FIX: try/finally ensures the status ALWAYS disappears
+            try:
+                voice_text = transcribe_audio(audio['bytes'])
+                st.session_state.last_voice_id = current_audio_id
+            finally:
+                status_container.empty()
 
-            # Clear status
-            status_container.empty()
-
-            # Save ID
-            st.session_state.last_voice_id = current_audio_id
-
-    # ✅ DEBUG BOX: Shows what was heard
     if voice_text:
         st.success(f"Heard: '{voice_text}'")
 
@@ -102,7 +95,10 @@ with st.sidebar:
     if st.button("🧹 Clear Plots"):
         plt.clf()
         engine.latest_figure = None
-        if os.path.exists("temp_chart.png"): os.remove("temp_chart.png")
+        # ✅ FIX: Clean from /tmp/
+        temp_dir = tempfile.gettempdir()
+        temp_chart = os.path.join(temp_dir, "temp_chart.png")
+        if os.path.exists(temp_chart): os.remove(temp_chart)
         st.success("Plots cleared.")
 
     st.divider()
@@ -113,7 +109,7 @@ with st.sidebar:
         history = load_history(current_sess)
         pdf_file = generate_pdf(history, current_sess)
         with open(pdf_file, "rb") as f:
-            st.download_button("⬇️ Download PDF", f, file_name=pdf_file)
+            st.download_button("⬇️ Download PDF", f, file_name=os.path.basename(pdf_file))
 
     st.divider()
 
@@ -138,11 +134,9 @@ for msg in history:
         st.markdown(msg["content"])
 
 # --- INPUT HANDLING ---
-# 1. ALWAYS render the input box so it never disappears
 user_input = st.chat_input("Enter command...")
 
 prompt = None
-# 2. Prioritize Voice if we just transcribed something, otherwise Text
 if voice_text:
     prompt = voice_text
 elif user_input:
@@ -153,7 +147,6 @@ if prompt:
         st.markdown(prompt)
     save_message(current_sess, "user", prompt)
 
-    # Refresh Cheatsheet
     if engine.df is not None and not engine.column_str:
         engine.column_str = ", ".join(list(engine.df.columns))
 
@@ -169,7 +162,6 @@ if prompt:
         3. Use 'python_analysis' for all data queries.
         """
     else:
-        # Sandbox Mode enabled
         system_text += """
         [SANDBOX MODE ACTIVE]
         1. No file loaded.
@@ -179,7 +171,6 @@ if prompt:
         3. If asked for real-world facts/news, use 'tavily'.
         """
 
-    # Memory Window
     recent_history = history[-6:]
 
     messages = [SystemMessage(content=system_text)] + \
@@ -187,12 +178,10 @@ if prompt:
                 recent_history] + \
                [HumanMessage(content=prompt)]
 
-    # Run Agent
     with st.chat_message("assistant", avatar=theme_data["ai_avatar"]):
         status_box = st.status("Processing...", expanded=True)
         try:
             final_resp = ""
-            # ✅ RECURSION LIMIT 10 (Safety)
             for event in app.stream({"messages": messages}, config={"recursion_limit": 10}, stream_mode="values"):
                 msg = event["messages"][-1]
 
@@ -203,11 +192,16 @@ if prompt:
                 if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
                     final_resp = msg.content
 
-            # 1. Render Chart
+            # 1. Render Chart & Save to TMP
             if engine.latest_figure:
                 st.pyplot(engine.latest_figure)
-                chart_path = f"chart_{current_sess}.png"
+
+                # ✅ FIX: Save to /tmp/ so PDF can find it
+                temp_dir = tempfile.gettempdir()
+                chart_path = os.path.join(temp_dir, "temp_chart.png")
                 engine.latest_figure.savefig(chart_path)
+
+                # Reset figure so it doesn't persist forever
                 engine.latest_figure = None
 
             # 2. Render Text

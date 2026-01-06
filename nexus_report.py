@@ -1,7 +1,7 @@
 import streamlit as st
 from fpdf import FPDF
 import os
-
+import tempfile
 
 class PDFReport(FPDF):
     def header(self):
@@ -13,7 +13,6 @@ class PDFReport(FPDF):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
         self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
-
 
 def generate_pdf(history, session_id):
     pdf = PDFReport()
@@ -28,7 +27,7 @@ def generate_pdf(history, session_id):
         role = msg["role"].upper()
         content = msg["content"]
 
-        # Clean text (handle special chars slightly)
+        # Clean text
         content = content.encode('latin-1', 'replace').decode('latin-1')
 
         # Role Header
@@ -42,12 +41,16 @@ def generate_pdf(history, session_id):
         pdf.multi_cell(0, 6, content)
         pdf.ln(3)
 
-    # Check for latest chart
-    if os.path.exists("temp_chart.png"):
+    # ✅ FIX: Look for chart in /tmp/
+    temp_dir = tempfile.gettempdir()
+    chart_path = os.path.join(temp_dir, "temp_chart.png")
+
+    if os.path.exists(chart_path):
         pdf.add_page()
         pdf.cell(0, 10, "Attached Analysis Chart:", ln=True)
-        pdf.image("temp_chart.png", x=10, y=30, w=180)
+        pdf.image(chart_path, x=10, y=30, w=180)
 
-    output_filename = f"report_{session_id}.pdf"
+    # ✅ FIX: Save PDF to /tmp/
+    output_filename = os.path.join(temp_dir, f"report_{session_id}.pdf")
     pdf.output(output_filename)
     return output_filename
