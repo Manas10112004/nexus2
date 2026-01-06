@@ -2,7 +2,7 @@ import streamlit as st
 import uuid
 import matplotlib.pyplot as plt
 import os
-import io  # <--- REQUIRED for audio handling
+import io
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 
 # --- CUSTOM MODULES ---
@@ -15,7 +15,7 @@ from nexus_brain import build_agent_graph, get_key_status
 from nexus_security import check_password, logout
 from nexus_report import generate_pdf
 from nexus_voice import transcribe_audio
-from streamlit_mic_recorder import mic_recorder  # <--- NEW WIDGET
+from streamlit_mic_recorder import mic_recorder
 
 # --- UI CONFIG ---
 st.set_page_config(page_title="Nexus AI", layout="wide", page_icon="⚡")
@@ -51,11 +51,10 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 2. VOICE MODE (REPAIRED) ---
+    # --- 2. VOICE MODE (DIAGNOSTIC MODE) ---
     st.markdown("### 🎙️ Voice Command")
 
-    # We use mic_recorder because the native widget was crashing (as seen in screenshot)
-    # This creates a simple button: Click to Start -> Speak -> Click to Stop
+    # Recorder
     audio_data = mic_recorder(
         start_prompt="🎤 Start Recording",
         stop_prompt="⏹️ Stop Recording",
@@ -67,20 +66,23 @@ with st.sidebar:
 
     voice_text = ""
 
-    # Process only if we have bytes
-    if audio_data and audio_data['bytes']:
-        with st.spinner("🎧 Processing Voice..."):
-            # Create a virtual file from the bytes
-            audio_bio = io.BytesIO(audio_data['bytes'])
-            audio_bio.name = "voice_input.wav"
-
-            # Send to API
-            voice_text = transcribe_audio(audio_bio)
-
-        if voice_text:
-            st.success(f"**Recognized:** \"{voice_text}\"")
+    # --- DIAGNOSTIC BLOCK ---
+    if audio_data is not None:
+        file_size = len(audio_data['bytes'])
+        if file_size < 100:
+            st.error(f"❌ Mic Error: Received only {file_size} bytes. (Too small)")
         else:
-            st.warning("No speech detected (or audio was too quiet).")
+            # st.info(f"✅ Audio Captured: {file_size} bytes. Sending to API...") # Uncomment to debug
+
+            with st.spinner("🎧 Transcribing..."):
+                audio_bio = io.BytesIO(audio_data['bytes'])
+                audio_bio.name = "voice_input.wav"
+                voice_text = transcribe_audio(audio_bio)
+
+            if voice_text and not voice_text.startswith("[Error"):
+                st.success(f"**Recognized:** \"{voice_text}\"")
+            else:
+                st.warning(f"Response: {voice_text}")
 
     st.divider()
 

@@ -7,29 +7,42 @@ client = None
 
 def init_voice_client():
     global client
-    # Fetches key dynamically from environment
+    # 1. Try Environment Variable (set by nexus_brain)
     api_key = os.environ.get("GROQ_API_KEY")
+
+    # 2. Fallback: Try Secrets directly (Safety Net)
+    if not api_key:
+        raw_keys = st.secrets.get("GROQ_API_KEYS", "")
+        if raw_keys:
+            api_key = raw_keys.split(",")[0].strip()
+
     if api_key:
-        client = Groq(api_key=api_key)
+        try:
+            client = Groq(api_key=api_key)
+        except Exception as e:
+            st.error(f"Groq Client Init Failed: {e}")
+            client = None
+    else:
+        # Debug Warning if Key is missing
+        print("DEBUG: No GROQ_API_KEY found in Env or Secrets.")
 
 
 def transcribe_audio(audio_file):
-    """
-    Transcribes audio directly from memory (BytesIO).
-    """
     if not client:
         init_voice_client()
 
-    if not client or not audio_file:
-        return None
+    if not client:
+        return "[Error: API Key missing. Check st.secrets]"
+
+    if not audio_file:
+        return "[Error: Audio file is empty]"
 
     try:
-        # 1. Rewind the virtual file to the start
         audio_file.seek(0)
 
-        # 2. Send to Groq API
+        # Call API
         transcription = client.audio.transcriptions.create(
-            file=("input.wav", audio_file),  # Tuple tells API this is a WAV file
+            file=("input.wav", audio_file),
             model="whisper-large-v3-turbo",
             response_format="json",
             language="en",
@@ -38,16 +51,11 @@ def transcribe_audio(audio_file):
 
         text = transcription.text.strip()
 
-        # 3. Basic Filter (Only filter pure hallucination)
+        # DEBUG: Return raw text even if it looks like a glitch
         if not text:
-            return ""
-
-        # Optional: Filter out "Thank you" hallucinations if text is VERY short
-        if len(text) < 15 and text.lower().replace(".", "") in ["thank you", "you"]:
-            return ""
+            return "[Error: API returned empty text]"
 
         return text
 
     except Exception as e:
-        # Return string with error so UI can show it
         return f"[API Error: {str(e)}]"
