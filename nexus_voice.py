@@ -27,9 +27,10 @@ def transcribe_audio(audio_bytes):
         with open("temp_voice.wav", "rb") as file:
             transcription = client.audio.transcriptions.create(
                 file=(os.path.basename("temp_voice.wav"), file.read()),
+                # 🛑 CRITICAL FIX: Use the Turbo model
                 model="whisper-large-v3-turbo",
-                # 1. GUIDE THE AI: Tells it to expect a command, not a conversation
-                prompt="User command for data analysis. Short technical query.",
+                # 🛑 CRITICAL FIX: Anti-Hallucination Prompt
+                prompt="User command for data analysis. SQL. Python. Plot. Calculate. No conversation.",
                 response_format="json",
                 language="en",
                 temperature=0.0
@@ -37,19 +38,21 @@ def transcribe_audio(audio_bytes):
 
         text = transcription.text.strip()
 
-        # 2. FILTER HALLUCINATIONS: Block common whisper glitches
+        # 🛑 CRITICAL FIX: Aggressive Filter List
         hallucinations = [
             "Thank you.", "Thank you", "Thanks.", "You",
             "MBC", "Amara.org", "Subtitles by", "Copyright",
-            "Thank you for watching"
+            "Thank you for watching", "I'm going to go to sleep",
+            "Bye", "Watching"
         ]
 
-        # If the output is just a hallucination, return empty so the app ignores it
-        if text in hallucinations or len(text) < 2:
+        # Filter logic
+        if any(h.lower() == text.lower() for h in hallucinations) or len(text) < 2:
             return ""
 
         return text
 
     except Exception as e:
-        st.error(f"Voice Error: {e}")
+        # Hide minor errors to prevent UI clutter
+        print(f"Voice Error: {e}")
         return None

@@ -3,7 +3,8 @@ import uuid
 import matplotlib.pyplot as plt
 import os
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
-from streamlit_mic_recorder import mic_recorder
+# 🟢 CHANGE: Use the Visualizer Library
+from audio_recorder_streamlit import audio_recorder
 
 # --- CUSTOM MODULES ---
 from nexus_db import init_db, save_message, load_history, clear_session, get_all_sessions, save_setting, load_setting
@@ -33,9 +34,8 @@ if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = f"Session-{uuid.uuid4().hex[:4]}"
 current_sess = st.session_state.current_session_id
 
-# Initialize Voice State
-if "last_voice_id" not in st.session_state:
-    st.session_state.last_voice_id = None
+if "last_voice_bytes" not in st.session_state:
+    st.session_state.last_voice_bytes = None
 
 # --- BUILD BRAIN ---
 app = build_agent_graph(engine)
@@ -54,33 +54,33 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 2. VOICE MODE (FIXED UI) ---
+    # --- 2. VOICE MODE (VISUALIZER) ---
     st.markdown("### 🎙️ Voice Input")
+    st.caption("Click the mic to record. Click again to stop.")
 
-    # Create a container for the status message that we can wipe later
-    status_container = st.empty()
-
-    audio = mic_recorder(
-        start_prompt="🎤 Speak",
-        stop_prompt="⏹️ Stop",
-        key='recorder',
-        format="wav",
-        use_container_width=True
+    # 🟢 NEW VISUALIZER COMPONENT
+    voice_bytes = audio_recorder(
+        text="",
+        recording_color="#e8b62c",
+        neutral_color="#6aa36f",
+        icon_name="microphone",
+        icon_size="2x"
     )
 
     voice_text = ""
-    if audio:
-        current_audio_id = hash(audio['bytes'])
-        if current_audio_id != st.session_state.last_voice_id:
-            # Show "Transcribing" inside the container
-            status_container.info("Transcribing...")
+    if voice_bytes and voice_bytes != st.session_state.last_voice_bytes:
+        # Show status
+        status_container = st.empty()
+        status_container.info("Transcribing...")
 
-            voice_text = transcribe_audio(audio['bytes'])
+        # Transcribe
+        voice_text = transcribe_audio(voice_bytes)
 
-            # Wipe the container clean immediately
-            status_container.empty()
+        # Clear status
+        status_container.empty()
 
-            st.session_state.last_voice_id = current_audio_id
+        # Update State
+        st.session_state.last_voice_bytes = voice_bytes
 
     st.divider()
 
@@ -134,6 +134,7 @@ for msg in history:
 user_input = st.chat_input("Enter command...")
 
 prompt = None
+# Prioritize Voice if fresh
 if voice_text:
     prompt = voice_text
 elif user_input:
