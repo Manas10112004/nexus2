@@ -81,13 +81,13 @@ def build_agent_graph(data_engine):
     init_keys()
 
     def agent_node(state):
-        # --- SHORT-CIRCUIT LOGIC (FIXED) ---
+        # --- SHORT-CIRCUIT LOGIC ---
         last_msg = state["messages"][-1]
 
         if isinstance(last_msg, ToolMessage):
             content = last_msg.content
 
-            # Helper to extract text
+            # Helper: Clean text
             def extract_text(raw):
                 clean = raw.replace("[CHART GENERATED]", "").replace("[ANALYSIS COMPLETE]", "").replace("Output:\n",
                                                                                                         "").strip()
@@ -96,7 +96,8 @@ def build_agent_graph(data_engine):
             # Case A: Chart Created
             if "[CHART GENERATED]" in content:
                 explanation = extract_text(content)
-                if not explanation: explanation = "Chart generated (No text description provided)."
+                if not explanation: explanation = "Chart generated."
+                # Return BOTH explanation and chart pointer
                 return {"messages": [AIMessage(content=f"{explanation}\n\n*(See the chart plotted above)*")]}
 
             # Case B: Text Analysis

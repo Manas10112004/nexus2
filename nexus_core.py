@@ -80,7 +80,7 @@ if prompt := st.chat_input("Enter command..."):
     if engine.df is not None and not engine.column_str:
         engine.column_str = ", ".join(list(engine.df.columns))
 
-    # --- ADVANCED SYSTEM PROMPT ---
+    # --- AGGRESSIVE SYSTEM PROMPT ---
     system_text = "You are Nexus."
     has_data = "df" in engine.scope
     if has_data:
@@ -89,18 +89,14 @@ if prompt := st.chat_input("Enter command..."):
         1. Variable 'df' is loaded.
         2. VALID COLUMNS: [{engine.column_str}]
 
-        3. 🚀 NEW: ADVANCED INSIGHT TOOLS AVAILABLE
-           - Use `insights.check_anomalies(df, 'col_name')` to find outliers.
-           - Use `insights.forecast_series(df, 'date_col', 'val_col', periods=30)` to predict future.
-           - Use `insights.get_correlation_drivers(df, 'target_col')` to find drivers.
+        3. ⚠️ MANDATORY TOOL USAGE ⚠️
+           - If user asks for "ANOMALIES" or "OUTLIERS" -> YOU MUST USE: `insights.check_anomalies(df, 'col')`. DO NOT write your own code.
+           - If user asks for "FORECAST" or "PREDICT" -> YOU MUST USE: `insights.forecast_series(df, 'date', 'val', 30)`.
+           - If user asks for "DRIVERS" or "CORRELATION" -> YOU MUST USE: `insights.get_correlation_drivers(df, 'target')`.
 
-        4. IF ASKED TO "SUMMARIZE" or "ANALYZE":
-           - Calculate Total Rows, Missing Values, Top Categories, and Key Stats.
-           - PRINT the output neatly.
-
-        5. DECISION RULE:
-           - IF asking for numbers/lists -> USE `print()`.
-           - IF asking for plots -> USE `plt.plot()`.
+        4. FOR SIMPLE QUESTIONS:
+           - Use `print()` for numbers.
+           - Use `plt.plot()` for charts.
         """
     else:
         system_text += " If no file, use 'tavily'."

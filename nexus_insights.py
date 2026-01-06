@@ -9,7 +9,7 @@ from statsmodels.tsa.holtwinters import ExponentialSmoothing
 class InsightModule:
     """
     Advanced Analytics Module for Nexus AI.
-    NOW WITH AUTO-PRINTING to ensure explanations appear with charts.
+    Features: Anomaly Detection, Forecasting, Smart Correlations.
     """
 
     def __init__(self):
@@ -31,13 +31,12 @@ class InsightModule:
         plt.title(f"Anomaly Detection: {column_name}")
         plt.legend()
 
-        # PRINT THE INSIGHT (Don't just return it)
+        # PRINT THE INSIGHT (Forces the explanation to appear)
         print(f"### 🔍 Anomaly Report: {column_name}")
         print(f"- **Total Anomalies Found:** {len(anomalies)}")
         if len(anomalies) > 0:
             avg_anom = anomalies[column_name].mean()
-            print(
-                f"- **Context:** The anomalies have an average value of {avg_anom:.2f}, which is significantly different from the norm.")
+            print(f"- **Context:** The anomalies have an average value of {avg_anom:.2f}.")
             print("- **Visual:** Look for the RED dots in the chart above.")
         else:
             print("- No significant anomalies detected.")
@@ -95,8 +94,8 @@ class InsightModule:
         print(f"- **Top Driver:** {top_driver} (Correlation: {top_score:.2f})")
         print("- **Interpretation:**")
         if top_score > 0.5:
-            print(f"  - Strong positive relationship. As '{top_driver}' goes up, '{target_col}' likely goes up.")
+            print(f"  - Strong positive relationship.")
         elif top_score < -0.5:
-            print(f"  - Strong negative relationship. As '{top_driver}' goes up, '{target_col}' goes down.")
+            print(f"  - Strong negative relationship.")
         else:
-            print("  - Relationships are moderate. Other factors may be involved.")
+            print("  - Relationships are moderate.")
