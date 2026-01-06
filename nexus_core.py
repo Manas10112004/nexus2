@@ -3,7 +3,7 @@ import uuid
 import matplotlib.pyplot as plt
 import os
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
-from audio_recorder_streamlit import audio_recorder  # <--- VISUALIZER LIB
+from audio_recorder_streamlit import audio_recorder
 
 # --- CUSTOM MODULES ---
 from nexus_db import init_db, save_message, load_history, clear_session, get_all_sessions, save_setting, load_setting

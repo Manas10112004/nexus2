@@ -27,12 +27,9 @@ def transcribe_audio(audio_bytes):
         with open("temp_voice.wav", "rb") as file:
             transcription = client.audio.transcriptions.create(
                 file=(os.path.basename("temp_voice.wav"), file.read()),
+                # Use the working Turbo model
                 model="whisper-large-v3-turbo",
-
-                # 🛑 FIX 1: Change Prompt to a generic example, not an instruction.
-                # This prevents the AI from parroting "SQL. Plot." back to you.
-                prompt="The profit margin for 2024 was ten percent.",
-
+                # REMOVED the "prompt" argument to stop it from parroting instructions
                 response_format="json",
                 language="en",
                 temperature=0.0
@@ -40,22 +37,19 @@ def transcribe_audio(audio_bytes):
 
         text = transcription.text.strip()
 
-        # 🛑 FIX 2: Add known "Prompt Leaks" to the block list
+        # Standard "Silence Hallucination" blockers
+        # These are the only things that should be blocked
         hallucinations = [
-            "Thank you.", "Thank you", "Thanks.", "You",
-            "MBC", "Amara.org", "Subtitles by", "Copyright",
-            "Thank you for watching", "I'm going to go to sleep",
-            "Bye", "Watching", "SQL. Plot. Calculate. No conversation.",
-            "User command for data analysis."
+            "Thank you.", "Thank you", "Thanks.", "You", "MBC",
+            "Amara.org", "Subtitles by", "Copyright", "Watching",
+            "Thank you for watching"
         ]
 
-        # Filter logic: Block if text is in list OR matches the prompt style
-        if any(h.lower() in text.lower() for h in hallucinations) or len(text) < 2:
+        # Simple exact match or "only hallucination" check
+        if text in hallucinations or text.lower().startswith("thank you for"):
             return ""
 
         return text
 
     except Exception as e:
-        # Hide minor errors to prevent UI clutter
-        print(f"Voice Error: {e}")
         return None
