@@ -51,10 +51,10 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 2. VOICE MODE (DIAGNOSTIC MODE) ---
+    # --- 2. VOICE MODE (FIXED) ---
     st.markdown("### 🎙️ Voice Command")
 
-    # Recorder
+    # Recorder Widget
     audio_data = mic_recorder(
         start_prompt="🎤 Start Recording",
         stop_prompt="⏹️ Stop Recording",
@@ -66,23 +66,20 @@ with st.sidebar:
 
     voice_text = ""
 
-    # --- DIAGNOSTIC BLOCK ---
-    if audio_data is not None:
-        file_size = len(audio_data['bytes'])
-        if file_size < 100:
-            st.error(f"❌ Mic Error: Received only {file_size} bytes. (Too small)")
+    # Process Audio
+    if audio_data and audio_data['bytes']:
+        with st.spinner("🎧 Transcribing..."):
+            # Create virtual file
+            audio_bio = io.BytesIO(audio_data['bytes'])
+            audio_bio.name = "voice_input.wav"
+
+            # Get raw text (no filters)
+            voice_text = transcribe_audio(audio_bio)
+
+        if voice_text:
+            st.success(f"**Heard:** \"{voice_text}\"")
         else:
-            # st.info(f"✅ Audio Captured: {file_size} bytes. Sending to API...") # Uncomment to debug
-
-            with st.spinner("🎧 Transcribing..."):
-                audio_bio = io.BytesIO(audio_data['bytes'])
-                audio_bio.name = "voice_input.wav"
-                voice_text = transcribe_audio(audio_bio)
-
-            if voice_text and not voice_text.startswith("[Error"):
-                st.success(f"**Recognized:** \"{voice_text}\"")
-            else:
-                st.warning(f"Response: {voice_text}")
+            st.warning("No speech detected.")
 
     st.divider()
 

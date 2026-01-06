@@ -7,24 +7,17 @@ client = None
 
 def init_voice_client():
     global client
-    # 1. Try Environment Variable (set by nexus_brain)
+    # 1. Try Environment Variable
     api_key = os.environ.get("GROQ_API_KEY")
 
-    # 2. Fallback: Try Secrets directly (Safety Net)
+    # 2. Fallback to Secrets
     if not api_key:
         raw_keys = st.secrets.get("GROQ_API_KEYS", "")
         if raw_keys:
             api_key = raw_keys.split(",")[0].strip()
 
     if api_key:
-        try:
-            client = Groq(api_key=api_key)
-        except Exception as e:
-            st.error(f"Groq Client Init Failed: {e}")
-            client = None
-    else:
-        # Debug Warning if Key is missing
-        print("DEBUG: No GROQ_API_KEY found in Env or Secrets.")
+        client = Groq(api_key=api_key)
 
 
 def transcribe_audio(audio_file):
@@ -32,12 +25,10 @@ def transcribe_audio(audio_file):
         init_voice_client()
 
     if not client:
-        return "[Error: API Key missing. Check st.secrets]"
-
-    if not audio_file:
-        return "[Error: Audio file is empty]"
+        return "[System Error: API Key missing]"
 
     try:
+        # Rewind file to start
         audio_file.seek(0)
 
         # Call API
@@ -51,9 +42,11 @@ def transcribe_audio(audio_file):
 
         text = transcription.text.strip()
 
-        # DEBUG: Return raw text even if it looks like a glitch
+        # --- FIX: STRICT FILTER REMOVED ---
+        # We now return whatever the AI heard, even if it's "Thank you."
+        # This helps you debug if the mic is too quiet.
         if not text:
-            return "[Error: API returned empty text]"
+            return ""
 
         return text
 
