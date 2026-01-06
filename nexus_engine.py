@@ -10,20 +10,16 @@ from io import StringIO
 # --- IMPORT NEW MODULE ---
 from nexus_insights import InsightModule
 
-
 class DataEngine:
     def __init__(self):
-        # Initialize the Insight Module
         self.insights = InsightModule()
-
-        # Add 'insights' to the AI's sandbox
         self.scope = {
             "pd": pd,
             "np": np,
             "plt": plt,
             "sns": sns,
             "st": st,
-            "insights": self.insights  # <--- THE AI CAN NOW USE THIS
+            "insights": self.insights
         }
         self.df = None
         self.column_str = ""
@@ -87,10 +83,15 @@ class DataEngine:
             plt.close('all')
             plt.figure(figsize=(10, 6))
 
+            # --- TWEAK: Ensure pandas prints full data for AI ---
+            pd.set_option('display.max_rows', 20)
+            pd.set_option('display.max_columns', None)
+            pd.set_option('display.width', 1000)
+            # ----------------------------------------------------
+
             exec(code, self.scope)
             result = redirected_output.getvalue()
 
-            # Ghost Buster: Check if plot actually has data
             if plt.get_fignums():
                 ax = plt.gca()
                 if len(ax.lines) > 0 or len(ax.patches) > 0 or len(ax.collections) > 0 or len(ax.images) > 0:

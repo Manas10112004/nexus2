@@ -81,31 +81,6 @@ def build_agent_graph(data_engine):
     init_keys()
 
     def agent_node(state):
-        # --- SHORT-CIRCUIT LOGIC ---
-        last_msg = state["messages"][-1]
-
-        if isinstance(last_msg, ToolMessage):
-            content = last_msg.content
-
-            # Helper: Clean text
-            def extract_text(raw):
-                clean = raw.replace("[CHART GENERATED]", "").replace("[ANALYSIS COMPLETE]", "").replace("Output:\n",
-                                                                                                        "").strip()
-                return clean
-
-            # Case A: Chart Created
-            if "[CHART GENERATED]" in content:
-                explanation = extract_text(content)
-                if not explanation: explanation = "Chart generated."
-                # Return BOTH explanation and chart pointer
-                return {"messages": [AIMessage(content=f"{explanation}\n\n*(See the chart plotted above)*")]}
-
-            # Case B: Text Analysis
-            if "[ANALYSIS COMPLETE]" in content:
-                clean_answer = extract_text(content)
-                if not clean_answer: clean_answer = "Analysis finished, but no text output was captured."
-                return {"messages": [AIMessage(content=f"**Analysis Results:**\n\n{clean_answer}")]}
-
         # --- STANDARD LLM EXECUTION ---
         has_data = "df" in data_engine.scope
         primary_model = MODEL_SMART if has_data else MODEL_FAST
@@ -118,10 +93,15 @@ def build_agent_graph(data_engine):
                     tools = get_tools(data_engine)
                     key = os.environ["GROQ_API_KEY"]
 
-                    llm = ChatGroq(model=model, temperature=0.1, api_key=key).bind_tools(tools,
-                                                                                         parallel_tool_calls=False)
+                    llm = ChatGroq(
+                        model=model,
+                        temperature=0.1,
+                        api_key=key
+                    ).bind_tools(tools, parallel_tool_calls=False)
 
+                    # Return the result directly so LangGraph adds it to history
                     return {"messages": [llm.invoke(state["messages"])]}
+
                 except Exception as e:
                     last_error = e
                     if "429" in str(e) or "Rate limit" in str(e):

@@ -80,8 +80,8 @@ if prompt := st.chat_input("Enter command..."):
     if engine.df is not None and not engine.column_str:
         engine.column_str = ", ".join(list(engine.df.columns))
 
-    # --- AGGRESSIVE SYSTEM PROMPT ---
-    system_text = "You are Nexus."
+    # --- SYSTEM PROMPT ---
+    system_text = "You are Nexus, an advanced data analysis AI."
     has_data = "df" in engine.scope
     if has_data:
         system_text += f"""
@@ -89,17 +89,14 @@ if prompt := st.chat_input("Enter command..."):
         1. Variable 'df' is loaded.
         2. VALID COLUMNS: [{engine.column_str}]
 
-        3. ⚠️ MANDATORY TOOL USAGE ⚠️
-           - If user asks for "ANOMALIES" or "OUTLIERS" -> YOU MUST USE: `insights.check_anomalies(df, 'col')`. DO NOT write your own code.
-           - If user asks for "FORECAST" or "PREDICT" -> YOU MUST USE: `insights.forecast_series(df, 'date', 'val', 30)`.
-           - If user asks for "DRIVERS" or "CORRELATION" -> YOU MUST USE: `insights.get_correlation_drivers(df, 'target')`.
-
-        4. FOR SIMPLE QUESTIONS:
-           - Use `print()` for numbers.
-           - Use `plt.plot()` for charts.
+        3. INSTRUCTIONS:
+           - When asked for specific insights (Anomalies, Forecasts), prefer using the 'insights' module if applicable.
+           - For general queries, write standard Python code using pandas/matplotlib.
+           - ALWAYS explain the code output to the user clearly. Don't just show the number, interpret it.
+           - If you generate a plot, mention "I have generated a chart above."
         """
     else:
-        system_text += " If no file, use 'tavily'."
+        system_text += " If no file, use 'tavily' for web search."
 
     # Memory Window
     recent_history = history[-6:]
@@ -114,28 +111,36 @@ if prompt := st.chat_input("Enter command..."):
         status_box = st.status("Processing...", expanded=True)
         try:
             final_resp = ""
+            # Loop through graph events
             for event in app.stream({"messages": messages}, config={"recursion_limit": 50}, stream_mode="values"):
                 msg = event["messages"][-1]
 
-                if isinstance(msg, ToolMessage):
-                    status_box.write(f"⚙️ Output: {msg.content[:200]}...")
+                # Show Tool Calls
                 if hasattr(msg, 'tool_calls') and msg.tool_calls:
                     for t in msg.tool_calls:
                         status_box.write(f"⚙️ Calling: `{t['name']}`")
-                if isinstance(msg, AIMessage) and msg.content:
-                    final_resp = msg.content
-                    st.markdown(final_resp)
 
-            # Show Chart
+                # Show Tool Output (Debug only, usually hidden in final UI)
+                if isinstance(msg, ToolMessage):
+                    status_box.write(f"⚙️ Data Received.")
+
+                # Capture Final AI Response
+                if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
+                    final_resp = msg.content
+
+            # 1. Render Chart if exists
             if engine.latest_figure:
                 st.pyplot(engine.latest_figure)
                 engine.latest_figure = None
 
+            # 2. Render Final Text
             if final_resp:
+                st.markdown(final_resp)
                 status_box.update(label="Complete", state="complete", expanded=False)
                 save_message(current_sess, "assistant", final_resp)
             else:
-                st.error("No response.")
+                # Fallback if no final text (rare)
+                status_box.update(label="Complete", state="complete", expanded=False)
 
         except Exception as e:
             status_box.update(label="Error", state="error")
