@@ -28,7 +28,7 @@ def transcribe_audio(audio_bytes):
             transcription = client.audio.transcriptions.create(
                 file=(os.path.basename("temp_voice.wav"), file.read()),
                 model="whisper-large-v3-turbo",
-                # 1. GUIDE THE AI TO EXPECT COMMANDS
+                # 1. GUIDE THE AI: Tells it to expect a command, not a conversation
                 prompt="User command for data analysis. Short technical query.",
                 response_format="json",
                 language="en",
@@ -37,13 +37,14 @@ def transcribe_audio(audio_bytes):
 
         text = transcription.text.strip()
 
-        # 2. FILTER KNOWN HALLUCINATIONS
+        # 2. FILTER HALLUCINATIONS: Block common whisper glitches
         hallucinations = [
             "Thank you.", "Thank you", "Thanks.", "You",
-            "MBC", "Amara.org", "Subtitles by", "Copyright"
+            "MBC", "Amara.org", "Subtitles by", "Copyright",
+            "Thank you for watching"
         ]
 
-        # If the output is JUST one of these phrases, ignore it.
+        # If the output is just a hallucination, return empty so the app ignores it
         if text in hallucinations or len(text) < 2:
             return ""
 
