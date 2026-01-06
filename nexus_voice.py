@@ -28,7 +28,13 @@ def transcribe_audio(audio_bytes):
         with open("temp_voice.wav", "rb") as file:
             transcription = client.audio.transcriptions.create(
                 file=(os.path.basename("temp_voice.wav"), file.read()),
-                model="distil-whisper-large-v3-en",
+
+                # 🔴 CHANGE THIS LINE:
+                # model="distil-whisper-large-v3-en",  <-- DELETE THIS
+
+                # 🟢 TO THIS:
+                model="whisper-large-v3-turbo",  # <-- INSERT THIS
+
                 response_format="json",
                 language="en",
                 temperature=0.0
