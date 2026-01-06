@@ -2,7 +2,6 @@ import streamlit as st
 import os
 from groq import Groq
 
-# Reuse the existing key mechanism from your brain
 client = None
 
 
@@ -20,7 +19,7 @@ def transcribe_audio(audio_bytes):
     if not client or not audio_bytes:
         return None
 
-    # Save temp file for Groq to read
+    # Save temp file
     with open("temp_voice.wav", "wb") as f:
         f.write(audio_bytes)
 
@@ -28,13 +27,28 @@ def transcribe_audio(audio_bytes):
         with open("temp_voice.wav", "rb") as file:
             transcription = client.audio.transcriptions.create(
                 file=(os.path.basename("temp_voice.wav"), file.read()),
-                # UPDATED MODEL NAME
                 model="whisper-large-v3-turbo",
+                # 1. GUIDE THE AI TO EXPECT COMMANDS
+                prompt="User command for data analysis. Short technical query.",
                 response_format="json",
                 language="en",
                 temperature=0.0
             )
-        return transcription.text
+
+        text = transcription.text.strip()
+
+        # 2. FILTER KNOWN HALLUCINATIONS
+        hallucinations = [
+            "Thank you.", "Thank you", "Thanks.", "You",
+            "MBC", "Amara.org", "Subtitles by", "Copyright"
+        ]
+
+        # If the output is JUST one of these phrases, ignore it.
+        if text in hallucinations or len(text) < 2:
+            return ""
+
+        return text
+
     except Exception as e:
         st.error(f"Voice Error: {e}")
         return None
