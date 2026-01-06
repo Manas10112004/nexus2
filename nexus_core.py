@@ -80,7 +80,7 @@ if prompt := st.chat_input("Enter command..."):
     if engine.df is not None and not engine.column_str:
         engine.column_str = ", ".join(list(engine.df.columns))
 
-    # --- THE FIX: "HD SUMMARY" INSTRUCTIONS ---
+    # --- ADVANCED SYSTEM PROMPT ---
     system_text = "You are Nexus."
     has_data = "df" in engine.scope
     if has_data:
@@ -88,15 +88,19 @@ if prompt := st.chat_input("Enter command..."):
         [DATA MODE ACTIVE]
         1. Variable 'df' is loaded.
         2. VALID COLUMNS: [{engine.column_str}]
-        3. IF ASKED TO "SUMMARIZE" or "ANALYZE" THE FILE:
-           - You MUST write a script that calculates and prints:
-             a) Total Rows & Columns
-             b) Missing Values (if any)
-             c) Top 3 Categories for non-numeric columns (e.g. Top Artists, Top Cities)
-             d) Key Statistics for numeric columns (Mean, Max)
-           - PRINT the output in a clean format. Do NOT just `print(df.head())`.
-        4. IF PLOTTING: Use `plt.figure()` -> `plt.plot()`.
-        5. DECISION RULE: If the user asks for numbers/text, use `print()`. If visual, use `plt`.
+
+        3. 🚀 NEW: ADVANCED INSIGHT TOOLS AVAILABLE
+           - Use `insights.check_anomalies(df, 'col_name')` to find outliers.
+           - Use `insights.forecast_series(df, 'date_col', 'val_col', periods=30)` to predict future.
+           - Use `insights.get_correlation_drivers(df, 'target_col')` to find drivers.
+
+        4. IF ASKED TO "SUMMARIZE" or "ANALYZE":
+           - Calculate Total Rows, Missing Values, Top Categories, and Key Stats.
+           - PRINT the output neatly.
+
+        5. DECISION RULE:
+           - IF asking for numbers/lists -> USE `print()`.
+           - IF asking for plots -> USE `plt.plot()`.
         """
     else:
         system_text += " If no file, use 'tavily'."

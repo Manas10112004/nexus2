@@ -81,7 +81,7 @@ def build_agent_graph(data_engine):
     init_keys()
 
     def agent_node(state):
-        # --- 1. SHORT-CIRCUIT LOGIC (The Anti-Loop & Visibility Fix) ---
+        # --- SHORT-CIRCUIT LOGIC ---
         last_msg = state["messages"][-1]
 
         if isinstance(last_msg, ToolMessage):
@@ -91,19 +91,14 @@ def build_agent_graph(data_engine):
             if "[CHART GENERATED]" in content:
                 return {"messages": [AIMessage(content="✅ Chart generated successfully. (See plot above)")]}
 
-            # Case B: Text Analysis (The Fix!)
+            # Case B: Text Analysis
             if "[ANALYSIS COMPLETE]" in content:
-                # Extract the actual answer text to show the user
-                # We remove the system tags so the user just sees the data
                 clean_answer = content.replace("[ANALYSIS COMPLETE]", "").replace("Output:\n", "").strip()
-
-                # If the answer is still empty (rare), provide a fallback
                 if not clean_answer:
                     clean_answer = "Analysis finished, but no text output was captured. (Did you print?)"
-
                 return {"messages": [AIMessage(content=f"**Analysis Results:**\n\n```\n{clean_answer}\n```")]}
 
-        # --- 2. STANDARD LLM EXECUTION ---
+        # --- STANDARD LLM EXECUTION ---
         has_data = "df" in data_engine.scope
         primary_model = MODEL_SMART if has_data else MODEL_FAST
         models = [primary_model, MODEL_FAST] if primary_model != MODEL_FAST else [MODEL_FAST]
