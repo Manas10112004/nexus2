@@ -12,3 +12,5 @@ matplotlib
 seaborn
 tabulate
 langchain_experimental
+statsmodels
+scikit-learn  
