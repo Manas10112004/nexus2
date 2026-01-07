@@ -2,8 +2,7 @@ import streamlit as st
 import uuid
 import matplotlib.pyplot as plt
 import os
-import io
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 # --- CUSTOM MODULES ---
 from nexus_db import init_db, save_message, load_history, clear_session, get_all_sessions, save_setting, load_setting
@@ -14,8 +13,6 @@ from nexus_brain import build_agent_graph, get_key_status
 # --- NEW MODULES ---
 from nexus_security import check_password, logout
 from nexus_report import generate_pdf
-from nexus_voice import transcribe_audio
-from streamlit_mic_recorder import mic_recorder
 
 # --- UI CONFIG ---
 st.set_page_config(page_title="Nexus AI", layout="wide", page_icon="⚡")
@@ -51,39 +48,11 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 2. VOICE MODE (FIXED) ---
-    st.markdown("### 🎙️ Voice Command")
+    # --- 2. DATA CENTER ---
+    st.markdown("### 📂 Data Center")
+    uploaded_file = st.file_uploader("Upload Dataset", type=['csv', 'xlsx', 'xls', 'json'],
+                                     help="Supported formats: CSV, Excel, JSON")
 
-    # Recorder Widget
-    audio_data = mic_recorder(
-        start_prompt="🎤 Start Recording",
-        stop_prompt="⏹️ Stop Recording",
-        just_once=True,
-        use_container_width=True,
-        format="wav",
-        key="recorder"
-    )
-
-    voice_text = ""
-
-    # Process Audio
-    if audio_data and audio_data['bytes']:
-        with st.spinner("🎧 Transcribing..."):
-            # Create virtual file
-            audio_bio = io.BytesIO(audio_data['bytes'])
-            audio_bio.name = "voice_input.wav"
-
-            # Get raw text (no filters)
-            voice_text = transcribe_audio(audio_bio)
-
-        if voice_text:
-            st.success(f"**Heard:** \"{voice_text}\"")
-        else:
-            st.warning("No speech detected.")
-
-    st.divider()
-
-    uploaded_file = st.file_uploader("📂 Upload File", type=None)
     if uploaded_file:
         status = engine.load_file(uploaded_file)
         if "Error" in status:
@@ -99,7 +68,7 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 3. SMART REPORTING ---
+    # --- 3. REPORTING ---
     st.markdown("### 📄 Reporting")
     if st.button("📥 Export PDF Report", use_container_width=True):
         with st.spinner("Compiling PDF..."):
@@ -139,25 +108,19 @@ for msg in history:
         st.markdown(msg["content"])
 
 # --- INPUT HANDLING ---
-user_input = st.chat_input("Enter command...")
-
-prompt = None
-# Prioritize Voice if valid
-if voice_text and not voice_text.startswith("["):
-    prompt = voice_text
-elif user_input:
-    prompt = user_input
+prompt = st.chat_input("Enter analysis command...")
 
 if prompt:
+    # 1. UI Echo
     with st.chat_message("user", avatar=theme_data["user_avatar"]):
         st.markdown(prompt)
     save_message(current_sess, "user", prompt)
 
-    # Refresh Cheatsheet
+    # 2. Refresh Context
     if engine.df is not None and not engine.column_str:
         engine.column_str = ", ".join(list(engine.df.columns))
 
-    # --- SYSTEM PROMPT (Robust & Flexible) ---
+    # 3. Construct System Prompt (Updated for Reasoning)
     system_text = "You are Nexus, an advanced data analysis AI. You have access to a Python environment."
     has_data = "df" in engine.scope
 
@@ -166,7 +129,11 @@ if prompt:
         [DATA MODE ACTIVE]
         1. Variable 'df' is loaded.
         2. VALID COLUMNS: [{engine.column_str}]
-        3. Use 'python_analysis' for all data queries.
+        3. RULES:
+           - Plan your step before writing code.
+           - Use 'python_analysis' for all data queries.
+           - When plotting, ALWAYS ensure the figure is created.
+           - If an error occurs, analyze the error message and retry with a fix.
         """
     else:
         system_text += """
@@ -178,43 +145,44 @@ if prompt:
         3. If asked for real-world facts/news, use 'tavily'.
         """
 
-    # Memory Window
-    recent_history = history[-6:]
+    # 4. Context Window (Last 8 messages for better context)
+    recent_history = history[-8:]
 
     messages = [SystemMessage(content=system_text)] + \
                [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in
                 recent_history] + \
                [HumanMessage(content=prompt)]
 
-    # Run Agent
+    # 5. Run Agent
     with st.chat_message("assistant", avatar=theme_data["ai_avatar"]):
-        status_box = st.status("Processing...", expanded=True)
+        status_box = st.status("Thinking...", expanded=True)
         try:
             final_resp = ""
-            for event in app.stream({"messages": messages}, config={"recursion_limit": 10}, stream_mode="values"):
+            # Stream the graph events with INCREASED recursion limit
+            for event in app.stream({"messages": messages}, config={"recursion_limit": 60}, stream_mode="values"):
                 msg = event["messages"][-1]
 
                 if hasattr(msg, 'tool_calls') and msg.tool_calls:
                     for t in msg.tool_calls:
-                        status_box.write(f"⚙️ Calling: `{t['name']}`")
+                        status_box.write(f"⚙️ Action: `{t['name']}`")
 
                 if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
                     final_resp = msg.content
 
-            # 1. Render Chart
+            # A. Render Chart (if generated)
             if engine.latest_figure:
                 st.pyplot(engine.latest_figure)
                 chart_path = f"chart_{current_sess}.png"
                 engine.latest_figure.savefig(chart_path)
                 engine.latest_figure = None
 
-            # 2. Render Text
+            # B. Render Text Response
             if final_resp:
                 st.markdown(final_resp)
                 status_box.update(label="Complete", state="complete", expanded=False)
                 save_message(current_sess, "assistant", final_resp)
             else:
-                status_box.update(label="Complete", state="complete", expanded=False)
+                status_box.update(label="Task Completed", state="complete", expanded=False)
 
         except Exception as e:
             status_box.update(label="Error", state="error")
