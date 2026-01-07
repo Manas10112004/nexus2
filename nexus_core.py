@@ -120,7 +120,7 @@ if prompt:
     if engine.df is not None and not engine.column_str:
         engine.column_str = ", ".join(list(engine.df.columns))
 
-    # 3. Construct System Prompt (Updated for Reasoning)
+    # 3. Construct System Prompt (Optimized for Tokens)
     system_text = "You are Nexus, an advanced data analysis AI. You have access to a Python environment."
     has_data = "df" in engine.scope
 
@@ -133,7 +133,6 @@ if prompt:
            - Plan your step before writing code.
            - Use 'python_analysis' for all data queries.
            - When plotting, ALWAYS ensure the figure is created.
-           - If an error occurs, analyze the error message and retry with a fix.
         """
     else:
         system_text += """
@@ -145,8 +144,9 @@ if prompt:
         3. If asked for real-world facts/news, use 'tavily'.
         """
 
-    # 4. Context Window (Last 8 messages for better context)
-    recent_history = history[-8:]
+    # 4. Context Window (REDUCED to prevent 413 Errors)
+    # Only keep the last 2 interactions to save tokens
+    recent_history = history[-2:]
 
     messages = [SystemMessage(content=system_text)] + \
                [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in
