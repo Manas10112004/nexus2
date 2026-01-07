@@ -1,69 +1,94 @@
 import streamlit as st
 from supabase import create_client, Client
-import os
 
-# --- CONNECT TO CLOUD ---
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    supabase = None
-else:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-def init_db():
-    """Checks connection to Supabase."""
-    if not supabase:
-        st.error("Supabase credentials not found. Please set SUPABASE_URL and SUPABASE_KEY in Secrets.")
+# --- CONNECTION MANAGER ---
+@st.cache_resource
+def get_supabase_client() -> Client:
+    """Establishes a connection to Supabase using secrets."""
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"Missing Database Secrets: {e}")
         st.stop()
 
+
+def init_db():
+    """Verifies database connection on startup."""
+    try:
+        client = get_supabase_client()
+        # Lightweight check to ensure table exists and we can connect
+        client.table("chat_history").select("id", count="exact").limit(1).execute()
+    except Exception as e:
+        # Don't stop app, just log (tables might be empty)
+        print(f"DB Check Warning: {e}")
+
+
+# --- CHAT HISTORY FUNCTIONS ---
+
 def save_message(session_id, role, content):
-    """Saves a message to the cloud."""
+    """Saves a message to Supabase with the current username."""
+    client = get_supabase_client()
+    username = st.session_state.get("username", "guest")
+
     data = {
         "session_id": session_id,
         "role": role,
-        "content": content
+        "content": content,
+        "username": username
     }
-    supabase.table("messages").insert(data).execute()
+    client.table("chat_history").insert(data).execute()
+
 
 def load_history(session_id):
     """Loads chat history for a specific session."""
-    response = supabase.table("messages") \
+    client = get_supabase_client()
+    response = client.table("chat_history") \
         .select("*") \
         .eq("session_id", session_id) \
         .order("created_at", desc=False) \
         .execute()
     return response.data
 
+
 def clear_session(session_id):
     """Deletes all messages for a specific session."""
-    supabase.table("messages").delete().eq("session_id", session_id).execute()
+    client = get_supabase_client()
+    client.table("chat_history").delete().eq("session_id", session_id).execute()
 
-def save_setting(key, value):
-    """Upserts a setting."""
-    data = {"key": key, "value": value}
-    supabase.table("settings").upsert(data).execute()
-
-def load_setting(key, default_value):
-    """Loads a setting."""
-    response = supabase.table("settings").select("value").eq("key", key).execute()
-    if response.data:
-        return response.data[0]['value']
-    return default_value
 
 def get_all_sessions():
-    """Fetches unique session IDs sorted by latest activity."""
-    # Note: Requires a 'messages' table.
-    # Efficiency Note: Ideally, keep a separate 'sessions' table, but this works for simple apps.
-    try:
-        response = supabase.table("messages").select("session_id, created_at").order("created_at", desc=True).limit(500).execute()
-        seen = set()
-        sessions = []
-        for row in response.data:
-            s_id = row['session_id']
-            if s_id not in seen:
-                seen.add(s_id)
-                sessions.append(s_id)
-        return sessions
-    except Exception:
-        return []
+    """Retrieves unique session IDs for the logged-in user."""
+    client = get_supabase_client()
+    username = st.session_state.get("username", "guest")
+
+    # Only fetch sessions belonging to this user
+    response = client.table("chat_history") \
+        .select("session_id") \
+        .eq("username", username) \
+        .order("created_at", desc=True) \
+        .execute()
+
+    # Deduplicate session IDs manually
+    unique_sessions = []
+    seen = set()
+    for row in response.data:
+        sid = row['session_id']
+        if sid not in seen:
+            unique_sessions.append(sid)
+            seen.add(sid)
+
+    return unique_sessions
+
+
+# --- SETTINGS MANAGEMENT ---
+# (Falling back to Session State for simplicity to avoid needing another SQL table)
+
+def save_setting(key, value):
+    st.session_state[f"setting_{key}"] = value
+
+
+def load_setting(key, default):
+    return st.session_state.get(f"setting_{key}", default)
