@@ -1,14 +1,13 @@
 import sys
 import os
 
-# --- FIX: Add the parent directory to the system path ---
-# This tells Python: "Look in the folder above this one for nexus_engine.py"
+# --- CRITICAL FIX: Add parent folder to Python's path ---
+# This allows the test to find 'nexus_engine.py' in the main folder
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import pytest
-import pandas as pd
 from io import BytesIO
-# Now this import will work because Python knows where to look
+# Now the import will work
 from nexus_engine import DataEngine
 
 
