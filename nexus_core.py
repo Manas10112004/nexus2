@@ -48,10 +48,10 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 2. DATA CENTER ---
+    # --- 2. DATA CENTER (Clean & Focused) ---
     st.markdown("### 📂 Data Center")
     uploaded_file = st.file_uploader("Upload Dataset", type=['csv', 'xlsx', 'xls', 'json'],
-                                     help="Supported formats: CSV, Excel, JSON")
+                                     help="Supported: CSV, Excel, JSON")
 
     if uploaded_file:
         status = engine.load_file(uploaded_file)
@@ -144,8 +144,7 @@ if prompt:
         3. If asked for real-world facts/news, use 'tavily'.
         """
 
-    # 4. Context Window (REDUCED to prevent 413 Errors)
-    # Only keep the last 2 interactions to save tokens
+    # 4. Context Window (Reduced to prevent 413 Errors)
     recent_history = history[-2:]
 
     messages = [SystemMessage(content=system_text)] + \
