@@ -37,7 +37,7 @@ app = build_agent_graph(engine)
 # --- SIDEBAR ---
 current_theme = load_setting("theme", "🌿 Eywa (Avatar)")
 inject_theme_css(current_theme)
-theme_data = THEMES.get(current_theme, THEMES["🌿 Eywa (Avatar)"])
+theme_data = THEMES.get(current_theme, THEMES["Nexus Enterprise"])
 
 with st.sidebar:
     st.title("⚙️ NEXUS HQ")
