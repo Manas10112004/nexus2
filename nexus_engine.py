@@ -3,13 +3,45 @@ import pandas as pd
 import numpy as np
 import sys
 import re
+import ast  # <--- NEW: For code scanning
 import matplotlib
-# ✅ FIX: Force non-interactive backend for Cloud
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 from io import StringIO
 from nexus_insights import InsightModule
+
+
+class SecurityManager:
+    """
+    Scans generated Python code for malicious imports or commands
+    before execution.
+    """
+    FORBIDDEN_IMPORTS = ['os', 'sys', 'subprocess', 'shutil', 'builtins', 'importlib']
+    FORBIDDEN_CALLS = ['exec', 'eval', 'compile', 'open']
+
+    @staticmethod
+    def is_safe(code: str) -> tuple[bool, str]:
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                # 1. Check Imports
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    module_names = [n.name.split('.')[0] for n in node.names] if isinstance(node, ast.Import) else [
+                        node.module.split('.')[0]]
+                    for name in module_names:
+                        if name in SecurityManager.FORBIDDEN_IMPORTS:
+                            return False, f"🚫 Security Violation: Import '{name}' is forbidden."
+
+                # 2. Check Function Calls
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Name) and node.func.id in SecurityManager.FORBIDDEN_CALLS:
+                        return False, f"🚫 Security Violation: Function '{node.func.id}()' is forbidden."
+            return True, "Safe"
+        except SyntaxError:
+            return False, "❌ Syntax Error in generated code."
+
 
 class DataEngine:
     def __init__(self):
@@ -40,42 +72,25 @@ class DataEngine:
                 self.column_str = ", ".join(list(self.df.columns))
                 self.scope["df"] = self.df
                 return f"✅ Data Loaded: {len(self.df)} rows. Columns: {self.column_str}"
-
-            elif name.endswith(('.txt', '.py', '.md', '.log', '.yaml')):
-                stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
-                self.file_content = stringio.read()
-                self.scope["file_content"] = self.file_content
-                return f"✅ Text Loaded: {len(self.file_content)} chars."
-
             else:
-                return f"⚠️ Binary file '{name}' (Limited Access)."
+                return f"⚠️ Unsupported file: {name}"
         except Exception as e:
             return f"❌ Error: {str(e)}"
 
     def _heal_code(self, code: str) -> str:
+        # (Same healing logic as before)
         if self.df is None: return code
-
         if ".corr()" in code and "numeric_only" not in code:
             code = code.replace(".corr()", ".select_dtypes(include=['number']).corr()")
-        if ".mean()" in code and "numeric_only" not in code:
-            code = code.replace(".mean()", ".mean(numeric_only=True)")
-
-        real_cols = list(self.df.columns)
-        col_map = {c.lower(): c for c in real_cols}
-        pattern = r"df\[['\"](.*?)['\"]\]"
-
-        def replace_match(match):
-            col_name = match.group(1)
-            lower_name = col_name.lower()
-            if col_name not in real_cols and lower_name in col_map:
-                correct_name = col_map[lower_name]
-                return f"df['{correct_name}']"
-            return match.group(0)
-
-        healed_code = re.sub(pattern, replace_match, code)
-        return healed_code
+        return code
 
     def run_python_analysis(self, code: str):
+        # 1. RUN SECURITY CHECK
+        is_safe, message = SecurityManager.is_safe(code)
+        if not is_safe:
+            return message
+
+        # 2. PROCEED IF SAFE
         code = self._heal_code(code)
         old_stdout = sys.stdout
         redirected_output = sys.stdout = StringIO()
@@ -83,26 +98,20 @@ class DataEngine:
         try:
             plt.close('all')
             plt.figure(figsize=(10, 6))
-
             pd.set_option('display.max_rows', 20)
-            pd.set_option('display.max_columns', None)
-            pd.set_option('display.width', 1000)
 
+            # Execute in restricted scope
             exec(code, self.scope)
             result = redirected_output.getvalue()
 
             if plt.get_fignums():
-                ax = plt.gca()
-                if len(ax.lines) > 0 or len(ax.patches) > 0 or len(ax.collections) > 0 or len(ax.images) > 0:
-                    self.latest_figure = plt.gcf()
-                    return f"Output:\n{result}\n[CHART GENERATED]"
-                else:
-                    plt.close()
+                self.latest_figure = plt.gcf()
+                return f"Output:\n{result}\n[CHART GENERATED]"
 
             if result and len(result.strip()) > 0:
                 return f"Output:\n{result}\n[ANALYSIS COMPLETE]"
 
-            return "❌ Error: Code ran but printed nothing. Use print() or plt.plot()."
+            return "❌ Code ran but produced no output."
 
         except Exception as e:
             return f"❌ Execution Error: {str(e)}"

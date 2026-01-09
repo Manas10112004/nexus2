@@ -19,4 +19,5 @@ bcrypt
 PyPDF2
 python-docx
 faiss-cpu
+langchain-huggingface
 sentence-transformers
