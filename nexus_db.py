@@ -28,9 +28,10 @@ def init_db():
 # --- CHAT HISTORY FUNCTIONS ---
 
 def save_message(session_id, role, content):
-    """Saves a message to Supabase with the current username."""
+    """Saves a message to Supabase with the current username (email)."""
     client = get_supabase_client()
-    username = st.session_state.get("username", "guest")
+    # Fallback to 'guest' if not logged in, though Auth should prevent this
+    username = st.session_state.get("user_email", "guest")
 
     data = {
         "session_id": session_id,
@@ -61,16 +62,17 @@ def clear_session(session_id):
 def get_all_sessions():
     """Retrieves unique session IDs for the logged-in user."""
     client = get_supabase_client()
-    username = st.session_state.get("username", "guest")
+    username = st.session_state.get("user_email", "guest")
 
     # Only fetch sessions belonging to this user
+    # Note: For large apps, use a dedicated 'sessions' table or .distinct() if available
     response = client.table("chat_history") \
         .select("session_id") \
         .eq("username", username) \
         .order("created_at", desc=True) \
         .execute()
 
-    # Deduplicate session IDs manually
+    # Deduplicate session IDs manually (Supabase JS client supports .distinct, Python client varies)
     unique_sessions = []
     seen = set()
     for row in response.data:
@@ -82,24 +84,38 @@ def get_all_sessions():
     return unique_sessions
 
 
-# --- [NEW] USER PLAN MANAGEMENT ---
+# --- [UPDATED] USER PLAN MANAGEMENT ---
 
-def get_user_plan(username):
-    """Fetches the user's plan type (free/pro). Defaults to free."""
+def get_user_plan(email):
+    """
+    Fetches the user's plan type from the 'profiles' table.
+    Defaults to 'free' if the user is not found or error occurs.
+    """
+    if not email:
+        return "free"
+
     client = get_supabase_client()
     try:
-        response = client.table("users").select("plan_type").eq("username", username).execute()
-        if response.data:
+        # Query the 'profiles' table using the email column
+        response = client.table("profiles").select("plan_type").eq("email", email).execute()
+        
+        if response.data and len(response.data) > 0:
             return response.data[0].get("plan_type", "free")
         return "free"
-    except Exception:
+    except Exception as e:
+        print(f"Plan Fetch Error: {e}")
         return "free"
 
 
-def update_user_plan(username, new_plan):
+def update_user_plan(email, new_plan):
     """Updates the user's plan (e.g., after payment)."""
     client = get_supabase_client()
-    client.table("users").update({"plan_type": new_plan}).eq("username", username).execute()
+    try:
+        client.table("profiles").update({"plan_type": new_plan}).eq("email", email).execute()
+        return True
+    except Exception as e:
+        print(f"Plan Update Error: {e}")
+        return False
 
 # ----------------------------------
 
