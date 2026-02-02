@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus AI Chatbot 2.0 | Architecture Showcase</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #10b981;
+            --danger: #ef4444;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            line-height: 1.6;
+        }
+
+        /* Container & Layout */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Hero Section */
+        header {
+            text-align: center;
+            padding: 4rem 0;
+            border-bottom: 1px solid #334155;
+        }
+
+        h1 { font-size: 3rem; margin-bottom: 0.5rem; background: -webkit-linear-gradient(45deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .subtitle { color: var(--text-secondary); font-size: 1.25rem; max-width: 600px; margin: 0 auto 2rem auto; }
+        
+        .btn {
+            display: inline-block;
+            background-color: var(--accent);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        .btn:hover { background-color: var(--accent-hover); }
+
+        /* Feature Grid */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin: 3rem 0;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            border: 1px solid #334155;
+            transition: transform 0.2s;
+        }
+        .card:hover { transform: translateY(-5px); }
+        .card h3 { color: var(--accent); margin-top: 0; }
+
+        /* Architecture Section */
+        .architecture {
+            margin-top: 4rem;
+        }
+        
+        .diagram-container {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            margin: 2rem 0;
+            overflow-x: auto;
+        }
+
+        /* Code Snippets */
+        pre {
+            background-color: #000;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            border-left: 4px solid var(--accent);
+        }
+        code { font-family: 'Courier New', Courier, monospace; color: #e2e8f0; }
+        .keyword { color: #c678dd; }
+        .func { color: #61afef; }
+        .string { color: #98c379; }
+
+        footer { text-align: center; padding: 2rem; color: var(--text-secondary); margin-top: 4rem; border-top: 1px solid #334155; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Nexus AI Chatbot 2.0</h1>
+            <p class="subtitle">A context-aware, self-healing AI agent orchestrated by LangGraph and secured by AST analysis.</p>
+            <a href="YOUR_GITHUB_REPO_LINK_HERE" class="btn">View Source on GitHub</a>
+        </header>
+
+        <section class="grid">
+            <div class="card">
+                <h3>⚡ Orchestration</h3>
+                <p><strong>LangGraph & LangChain</strong></p>
+                <p>Manages stateful agent loops and cyclic graphs[cite: 5].</p>
+            </div>
+            <div class="card">
+                <h3>🧠 Intelligence</h3>
+                <p><strong>Groq Llama 3.3 70b</strong></p>
+                <p>Ultra-low latency inference with smart model routing[cite: 6, 15].</p>
+            </div>
+            <div class="card">
+                <h3>🛡️ Security</h3>
+                <p><strong>AST Firewall</strong></p>
+                <p>Abstract Syntax Tree parsing to block dangerous imports before execution[cite: 11].</p>
+            </div>
+            <div class="card">
+                <h3>📈 Visualization</h3>
+                <p><strong>Streamlit & Matplotlib</strong></p>
+                <p>Dynamic frontend rendering with real-time data plotting[cite: 4, 9].</p>
+            </div>
+        </section>
+
+        <section class="architecture">
+            <h2>🧠 The Brain: Resilient Model Routing</h2>
+            <p>The <code>nexus_brain.py</code> module features a "High Availability" logic flow. It prioritizes the 70b model but automatically rotates API keys or degrades to the 8b model if rate limits (429) are detected[cite: 46, 53].</p>
+            
+            <div class="diagram-container">
+                <div class="mermaid">
+                    graph TD
+                    Start[User Input] --> Attempt{Try Llama-70b Smart}
+                    Attempt -->|Success| Response[Return Answer]
+                    Attempt -->|Error 429| Rotate[Rotate API Key]
+                    Rotate --> Retry[Retry Llama-70b]
+                    Attempt -->|Other Error| Fallback[Fallback to Llama-8b Fast]
+                    Fallback --> Response
+                    style Start fill:#3b82f6,color:white
+                    style Attempt fill:#1e293b,color:white,stroke:#3b82f6
+                    style Rotate fill:#ef4444,color:white
+                    style Fallback fill:#10b981,color:white
+                </div>
+            </div>
+
+            <h3>Key Code: Rate Limit Rotation</h3>
+            <pre><code><span class="keyword">def</span> <span class="func">agent_node</span>(state):
+    <span class="keyword">try</span>:
+        response = llm.invoke(state["messages"])
+    <span class="keyword">except</span> Exception <span class="keyword">as</span> e:
+        <span class="keyword">if</span> <span class="string">"429"</span> <span class="keyword">in</span> str(e):
+            <span class="func">rotate_groq_key()</span> <span class="comment"># Switches credentials instantly [cite: 67]</span>
+            <span class="keyword">return</span> agent_node(state)</code></pre>
+        </section>
+
+        <section class="architecture">
+            <h2>⚙️ The Engine: Secure Execution Sandbox</h2>
+            <p>The <code>nexus_engine.py</code> module acts as a firewall. It does not blindly execute code; it parses the code structure first to ensure safety[cite: 117].</p>
+            
+            <div class="diagram-container">
+                <div class="mermaid">
+                    graph LR
+                    Gen[Generated Python Code] --> AST{AST Security Scan}
+                    AST -->|Forbidden Import| Block[🚫 Block Execution]
+                    AST -->|Safe| Heal[❤️ Self-Healing]
+                    Heal --> Exec[🚀 Execute in Sandbox]
+                    Exec --> Out[Return Charts & Data]
+                    
+                    style AST fill:#ef4444,color:white
+                    style Heal fill:#10b981,color:white
+                </div>
+            </div>
+
+            <h3>Key Code: AST Firewall</h3>
+            <pre><code><span class="keyword">def</span> <span class="func">is_safe</span>(code: str):
+    tree = ast.parse(code)
+    <span class="keyword">for</span> node <span class="keyword">in</span> ast.walk(tree):
+        <span class="keyword">if</span> isinstance(node, ast.Import):
+             <span class="keyword">if</span> node.names[0].name <span class="keyword">in</span> [<span class="string">'os'</span>, <span class="string">'sys'</span>]:
+                 <span class="keyword">return</span> <span class="keyword">False</span> <span class="comment"># Blocks execution [cite: 123]</span>
+    <span class="keyword">return</span> <span class="keyword">True</span></code></pre>
+        </section>
+
+        <footer>
+            <p>Nexus AI Chatbot 2.0 | Documentation & Architecture Showcase</p>
+        </footer>
+    </div>
+
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</body>
+</html>
