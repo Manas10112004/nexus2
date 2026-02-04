@@ -53,6 +53,7 @@ class DataEngine:
             "sns": sns,
             "st": st,
             "insights": self.insights
+            "nexus_cpp": nexus_cpp
         }
         self.df = None
         self.column_str = ""
