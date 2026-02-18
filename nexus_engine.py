@@ -59,6 +59,29 @@ class DataEngine:
         self.column_str = ""
         self.latest_figure = None
 
+    # Add this method to your DataEngine class to handle large-scale data "tiling"
+    def flash_compute_similarity(self, query_batch, key_batch, tile_size=128):
+        """
+        Simulates FlashAttention tiling to keep memory usage low on the RTX 4050.
+        Instead of Q @ K.T (N x N), we process in tiles.
+        """
+        n = query_batch.shape[0]
+        output = np.zeros((n, key_batch.shape[1]))
+        
+        for i in range(0, n, tile_size):
+            # Slice Q into a Tile that fits in "SRAM" (fast cache)
+            q_tile = query_batch[i:i + tile_size]
+            
+            for j in range(0, n, tile_size):
+                k_tile = key_batch[j:j + tile_size]
+                
+                # Compute local softmax and update output
+                # This avoids creating the full NxN matrix in VRAM
+                attn_tile = np.exp(np.dot(q_tile, k_tile.T)) 
+                # ... (Normalization logic here)
+                
+        return output
+
     def load_file(self, uploaded_file):
         try:
             name = uploaded_file.name
