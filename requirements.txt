@@ -21,3 +21,9 @@ python-docx
 faiss-cpu
 langchain-huggingface
 sentence-transformers
+torch
+torchvision
+torchaudio
+transformers
+accelerate
+pybind11
