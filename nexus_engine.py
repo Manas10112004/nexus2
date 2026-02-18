@@ -57,7 +57,7 @@ class DataEngine:
 
     def run_python_analysis(self, code: str):
         # Security and execution logic
-        old_stdout = sys.stdout
+        '''old_stdout = sys.stdout
         redirected_output = sys.stdout = StringIO()
         try:
             plt.close('all')
@@ -71,4 +71,6 @@ class DataEngine:
         except Exception as e:
             return f"❌ Execution Error: {str(e)}"
         finally:
-            sys.stdout = old_stdout
+            sys.stdout = old_stdout'''
+    code = self._heal_code(code)
+    old_stdout = sys.stdout
