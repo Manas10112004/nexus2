@@ -28,3 +28,4 @@ transformers
 accelerate
 pybind11
 -e .
+pybind11
