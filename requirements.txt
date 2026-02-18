@@ -1,3 +1,4 @@
+pybind11
 streamlit
 fpdf
 supabase
@@ -10,22 +11,9 @@ pandas
 openpyxl
 matplotlib
 seaborn
-tabulate
-langchain_experimental
 statsmodels
 scikit-learn
-pytest
-bcrypt
-PyPDF2
-python-docx
-faiss-cpu
-langchain-huggingface
-sentence-transformers
 torch
-torchvision
-torchaudio
 transformers
 accelerate
-pybind11
 -e .
-pybind11
