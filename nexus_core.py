@@ -19,8 +19,8 @@ from nexus_report import generate_pdf
 st.set_page_config(page_title="Nexus AI", layout="wide", page_icon="⚡")
 
 # --- 1. SECURITY GATE (Login Screen) ---
-if not check_password():
-    st.stop()
+#if not check_password():
+    #st.stop()
 
 init_db()
 
@@ -67,8 +67,8 @@ with st.sidebar:
 
     st.caption(get_key_status())
 
-    if st.button("🔒 Logout", use_container_width=True):
-        logout()
+    '''if st.button("🔒 Logout", use_container_width=True):
+        logout()'''
 
     st.divider()
 
