@@ -13,7 +13,25 @@ def get_supabase_client() -> Client:
         st.error(f"Missing Database Secrets: {e}")
         st.stop()
 
-
+def verify_user_plaintext(username, password):
+    """
+    Checks if a username and password match in the 'profiles' table.
+    [DEV ONLY]: Uses plaintext comparison.
+    """
+    client = get_supabase_client()
+    try:
+        # Querying the profiles table for a direct match
+        response = client.table("profiles")\
+            .select("*")\
+            .eq("username", username)\
+            .eq("password", password)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            return True, response.data[0]
+        return False, "❌ Invalid username or password."
+    except Exception as e:
+        return False, f"❌ Database Error: {str(e)}"
 def init_db():
     """Verifies database connection on startup."""
     try:
