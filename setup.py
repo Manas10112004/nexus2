@@ -12,7 +12,6 @@ cpp_module = Extension(
 setup(
     name='nexus_cpp',
     version='1.0',
-    description='C++ Accelerator for Nexus AI',
     ext_modules=[cpp_module],
-    zip_safe=False,
+    install_requires=['pybind11'],
 )
