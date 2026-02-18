@@ -58,40 +58,38 @@ def verify_otp(email, token):
     except Exception as e:
         return False, str(e)
 
-
 def logout():
-    supabase = get_supabase_client()
-    supabase.auth.sign_out()
     st.session_state["authenticated"] = False
     st.session_state["user_email"] = None
+    st.session_state["username"] = None
     st.rerun()
 
 
 # --- UI COMPONENTS ---
 
 def login_form():
-    st.markdown("## 🔐 Nexus AI Secure Login")
+    st.markdown("## 🔓 Dev-Mode: Secure Login")
+    
+    # Simple form for plaintext authentication
+    with st.form("dev_login"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Log In")
 
-    # Toggle between modes
-    auth_mode = st.radio("Authentication Mode", ["Standard Login", "Sign Up", "Passwordless (OTP)"], horizontal=True)
-
-    if auth_mode == "Standard Login":
-        with st.form("login_std"):
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Log In")
-
-            if submitted:
-                success, user = sign_in_with_password(email, password)
-                if success:
-                    st.session_state["authenticated"] = True
-                    st.session_state["user_email"] = user.email
-                    st.session_state["username"] = user.email.split("@")[0]  # Derive username
-                    st.success("Welcome back!")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error(f"Login failed: {user}")
+        if submitted:
+            success, user_data = verify_user_plaintext(username, password)
+            if success:
+                st.session_state["authenticated"] = True
+                # Set session variables used by the rest of the app
+                st.session_state["user_email"] = user_data.get("email", f"{username}@nexus.dev")
+                st.session_state["username"] = username
+                st.session_state["user_plan"] = user_data.get("plan_type", "free")
+                
+                st.success(f"Welcome, {username}!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error(user_data)
 
     elif auth_mode == "Sign Up":
         with st.form("signup_form"):
