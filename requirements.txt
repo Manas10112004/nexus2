@@ -27,3 +27,4 @@ torchaudio
 transformers
 accelerate
 pybind11
+-e .
